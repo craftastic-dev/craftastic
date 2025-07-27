@@ -1,11 +1,10 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useLayoutEffect } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 import { Terminal as XTerm } from 'xterm';
 import { FitAddon } from 'xterm-addon-fit';
 import { WebLinksAddon } from 'xterm-addon-web-links';
-import { GitBranch } from 'lucide-react';
+import { Maximize2, Minimize2 } from 'lucide-react';
 import 'xterm/css/xterm.css';
-import { GitPanel } from '../components/GitPanel';
 import { SessionList } from '../components/SessionList';
 import { Button } from '../components/ui/button';
 
@@ -21,7 +20,7 @@ export function Terminal() {
   const resizeObserverRef = useRef<ResizeObserver | null>(null);
   const lastSizeRef = useRef<{ cols: number; rows: number }>({ cols: 0, rows: 0 });
   
-  const [showGitPanel, setShowGitPanel] = useState(false);
+  const [isExpanded, setIsExpanded] = useState(false);
 
   useEffect(() => {
     if (!terminalRef.current || !sessionId || !environmentId) return;
@@ -281,7 +280,7 @@ export function Terminal() {
     };
   }, [sessionId, environmentId]);
 
-  // Handle terminal resize when git panel is toggled
+  // Handle terminal resize when git panel is toggled or expanded state changes
   useEffect(() => {
     const timer = setTimeout(() => {
       if (fitAddonRef.current && xtermRef.current) {
@@ -298,61 +297,125 @@ export function Terminal() {
               cols: xtermRef.current.cols,
               rows: xtermRef.current.rows,
             };
-            console.log('Sending dimensions after git panel toggle:', dimensions);
+            console.log('Sending dimensions after layout change:', dimensions);
             wsRef.current.send(JSON.stringify(dimensions));
           }
         } catch (error) {
-          console.error('Error during git panel resize:', error);
+          console.error('Error during layout resize:', error);
         }
       }
     }, 200);
 
     return () => clearTimeout(timer);
-  }, [showGitPanel]);
+  }, [isExpanded]);
+
+  // Immediate refit when expanded state changes
+  useLayoutEffect(() => {
+    console.log('isExpanded changed to:', isExpanded);
+    
+    // Force a layout recalculation first
+    if (terminalRef.current) {
+      terminalRef.current.offsetHeight;
+    }
+    
+    const timer = setTimeout(() => {
+      if (fitAddonRef.current && xtermRef.current && terminalRef.current) {
+        try {
+          // Temporarily hide the terminal to force layout recalculation
+          const originalDisplay = terminalRef.current.style.display;
+          terminalRef.current.style.display = 'none';
+          
+          // Force layout recalculation
+          terminalRef.current.offsetHeight;
+          
+          // Show the terminal again
+          terminalRef.current.style.display = originalDisplay || 'block';
+          
+          const containerRect = terminalRef.current.getBoundingClientRect();
+          console.log('Container dimensions:', containerRect.width, 'x', containerRect.height);
+          
+          if (containerRect.width === 0 || containerRect.height === 0) {
+            console.warn('Container has zero dimensions, skipping fit');
+            return;
+          }
+          
+          console.log('Refitting terminal after state change');
+          fitAddonRef.current.fit();
+          xtermRef.current.refresh(0, xtermRef.current.rows - 1);
+          
+          // Send new dimensions to server
+          if (wsRef.current?.readyState === WebSocket.OPEN && xtermRef.current.cols && xtermRef.current.rows) {
+            const dimensions = {
+              type: 'resize',
+              cols: xtermRef.current.cols,
+              rows: xtermRef.current.rows,
+            };
+            console.log('Sending dimensions after immediate refit:', dimensions);
+            wsRef.current.send(JSON.stringify(dimensions));
+          }
+        } catch (error) {
+          console.error('Error during immediate refit:', error);
+        }
+      }
+    }, 200);
+
+    return () => clearTimeout(timer);
+  }, [isExpanded]);
 
   return (
-    <div className="flex flex-col flex-1 min-h-0 bg-background">
-      <div className="h-14 border-b border-border flex items-center justify-between px-4 bg-background">
-        <h2 className="text-lg font-semibold">
-          Terminal - Session: {sessionId?.substring(0, 8)}
-        </h2>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => setShowGitPanel(!showGitPanel)}
-        >
-          <GitBranch className="h-4 w-4 mr-2" />
-          {showGitPanel ? 'Hide' : 'Show'} Git Panel
-        </Button>
-      </div>
-      
-      <div className="flex-1 flex overflow-hidden">
-        {environmentId && (
-          <div className="w-64 border-r border-border bg-background flex-shrink-0">
-            <SessionList environmentId={environmentId} />
+    <div className={`flex flex-col bg-background ${isExpanded ? 'fixed inset-0 z-50' : 'h-full'}`}>
+      {/* Collapse Button - only show when expanded */}
+      {isExpanded && (
+        <div className="absolute top-4 right-4 z-10">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              console.log('Collapse clicked, current isExpanded:', isExpanded);
+              setIsExpanded(!isExpanded);
+            }}
+            className="bg-background/80 backdrop-blur-sm"
+          >
+            <Minimize2 className="h-4 w-4 mr-2" />
+            Collapse
+          </Button>
+        </div>
+      )}
+
+      {/* Header - only show when not expanded */}
+      {!isExpanded && (
+        <div className="h-14 border-b border-border flex items-center justify-between px-4 bg-background">
+          <h2 className="text-lg font-semibold">
+            Terminal - Session: {sessionId?.substring(0, 8)}
+          </h2>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                console.log('Expand clicked, current isExpanded:', isExpanded);
+                setIsExpanded(!isExpanded);
+              }}
+            >
+              <Maximize2 className="h-4 w-4 mr-2" />
+              Expand
+            </Button>
           </div>
+        </div>
+      )}
+      
+      {/* Main Content */}
+      <div className="flex-1 flex overflow-hidden min-w-0">
+        {/* Sessions Sidebar - only show when not expanded */}
+        {environmentId && !isExpanded && (
+          <SessionList environmentId={environmentId} />
         )}
         
-        <div className="flex-1 flex flex-col bg-black min-w-0">
-          <div 
-            ref={terminalRef} 
-            className="flex-1 w-full h-full terminal-container"
-            style={{ 
-              minHeight: 0,
-              minWidth: 0,
-              display: 'flex',
-              flexDirection: 'column',
-              position: 'relative',
-              overflow: 'hidden',
-            }}
-          />
+        {/* Terminal - always present */}
+        <div className="flex-1 flex bg-black min-w-0 overflow-hidden basis-0">
+          <div ref={terminalRef} className="flex-1 w-full h-full" />
         </div>
         
-        {showGitPanel && environmentId && (
-          <div className="w-80 border-l border-border bg-background flex-shrink-0">
-            <GitPanel environmentId={environmentId} />
-          </div>
-        )}
       </div>
     </div>
   );
