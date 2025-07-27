@@ -40,46 +40,46 @@ deployments (id, environment_id, app_id, status, created_at, metadata)
 ## Project Structure
 
 ```
-/src
-├── config.ts                    # Environment configuration with Zod validation
-├── index.ts                     # Fastify server setup and route registration
-├── lib/
-│   ├── database.ts              # Database connection setup
-│   ├── database-types.ts        # Kysely type definitions
-│   ├── kysely.ts               # Kysely query builder setup
-│   ├── migrator.ts             # Database migration runner
-│   ├── environment-service.ts   # Environment business logic
-│   └── vite-dev.ts             # Vite development server integration
-├── migrations/                  # Database migrations (Kysely-based)
-│   ├── 001_initial_schema.ts
-│   └── 002_migrate_legacy_data.ts
-├── routes/                      # API route handlers
-│   ├── environments.ts         # Environment CRUD operations
-│   ├── sessions.ts             # Session management
-│   ├── terminal.ts             # WebSocket terminal connections
-│   ├── git.ts                  # Git operations (commit, push, status)
-│   ├── deployment.ts           # Coolify integration
-│   └── containers.ts           # Legacy container routes
-├── scripts/                     # Database migration scripts
-│   ├── migrate.ts
-│   ├── rollback.ts
-│   └── create-migration.ts
-└── services/
-    ├── docker.ts               # Docker container management
-    └── terminal.ts             # Terminal session management
-
-/frontend
+/services/orchestrator
 ├── src/
-│   ├── api/client.ts           # API client with TypeScript interfaces
-│   ├── components/
-│   │   ├── ui/                 # shadcn/ui components (button, card, scroll-area)
-│   │   ├── GitPanel.tsx        # Git operations interface
-│   │   └── SessionList.tsx     # Environment session management
-│   ├── pages/
-│   │   ├── Dashboard.tsx       # Environment overview and creation
-│   │   ├── Environment.tsx     # Single environment view
-│   │   └── Terminal.tsx        # Terminal interface with xterm.js
-│   └── lib/utils.ts            # Utility functions (cn, etc.)
+│   ├── config.ts                    # Environment configuration with Zod validation
+│   ├── index.ts                     # Fastify server setup and route registration
+│   ├── lib/
+│   │   ├── database.ts              # Database connection setup
+│   │   ├── database-types.ts        # Kysely type definitions
+│   │   ├── kysely.ts               # Kysely query builder setup
+│   │   ├── migrator.ts             # Database migration runner
+│   │   ├── environment-service.ts   # Environment business logic
+│   │   └── vite-dev.ts             # Vite development server integration
+│   ├── migrations/                  # Database migrations (Kysely-based)
+│   │   ├── 001_initial_schema.ts
+│   │   └── 002_migrate_legacy_data.ts
+│   ├── routes/                      # API route handlers
+│   │   ├── environments.ts         # Environment CRUD operations
+│   │   ├── sessions.ts             # Session management
+│   │   ├── terminal.ts             # WebSocket terminal connections
+│   │   ├── git.ts                  # Git operations (commit, push, status)
+│   │   ├── deployment.ts           # Coolify integration
+│   │   └── containers.ts           # Legacy container routes
+│   ├── scripts/                     # Database migration scripts
+│   │   ├── migrate.ts
+│   │   ├── rollback.ts
+│   │   └── create-migration.ts
+│   └── services/
+│       ├── docker.ts               # Docker container management
+│       └── terminal.ts             # Terminal session management
+└── frontend/
+    └── src/
+        ├── api/client.ts           # API client with TypeScript interfaces
+        ├── components/
+        │   ├── ui/                 # shadcn/ui components (button, card, scroll-area)
+        │   ├── GitPanel.tsx        # Git operations interface
+        │   └── SessionList.tsx     # Environment session management
+        ├── pages/
+        │   ├── Dashboard.tsx       # Environment overview and creation
+        │   ├── Environment.tsx     # Single environment view
+        │   └── Terminal.tsx        # Terminal interface with xterm.js
+        └── lib/utils.ts            # Utility functions (cn, etc.)
 ```
 
 ## Key Development Commands
@@ -196,9 +196,9 @@ CORS_ORIGIN=*
 ## Development Workflow
 
 1. **Create Migration**: Use `npm run migrate:create` for schema changes
-2. **Update Types**: Modify `src/lib/database-types.ts` to match schema
-3. **Implement Routes**: Add API endpoints in `src/routes/`
-4. **Type Safety**: Update frontend types in `frontend/src/api/client.ts`
+2. **Update Types**: Modify `services/orchestrator/src/lib/database-types.ts` to match schema
+3. **Implement Routes**: Add API endpoints in `services/orchestrator/src/routes/`
+4. **Type Safety**: Update frontend types in `services/orchestrator/frontend/src/api/client.ts`
 5. **UI Components**: Build UI with shadcn/ui components
 6. **Test Integration**: Verify full stack functionality
 
