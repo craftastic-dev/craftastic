@@ -1,11 +1,16 @@
 import { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Plus, Terminal, Trash2, ArrowLeft, GitBranch, Folder, Clock } from 'lucide-react';
+import { Plus, Terminal, Trash2, ArrowLeft, GitBranch, Folder, Clock, Play, Square, Settings } from 'lucide-react';
 import { api } from '../api/client';
 import type { Environment as EnvironmentType, Session } from '../api/client';
 import { Button } from '../components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '../components/ui/dialog';
+import { Input } from '../components/ui/input';
+import { Label } from '../components/ui/label';
+import { Badge } from '../components/ui/badge';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '../components/ui/dropdown-menu';
 
 export function Environment() {
   const { environmentId } = useParams<{ environmentId: string }>();
@@ -42,7 +47,7 @@ export function Environment() {
     },
   });
 
-  const [showCreateForm, setShowCreateForm] = useState(false);
+  const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [newSessionName, setNewSessionName] = useState('');
   const [newSessionWorkingDir, setNewSessionWorkingDir] = useState('/workspace');
 
@@ -54,7 +59,7 @@ export function Environment() {
     
     setNewSessionName('');
     setNewSessionWorkingDir('/workspace');
-    setShowCreateForm(false);
+    setShowCreateDialog(false);
   };
 
   const formatDate = (dateString: string) => {
@@ -64,6 +69,32 @@ export function Environment() {
       hour: '2-digit',
       minute: '2-digit',
     });
+  };
+
+  const getStatusColor = (status: string) => {
+    switch (status) {
+      case 'active':
+        return 'bg-green-500';
+      case 'inactive':
+        return 'bg-yellow-500';
+      case 'dead':
+        return 'bg-red-500';
+      default:
+        return 'bg-gray-500';
+    }
+  };
+
+  const getStatusText = (status: string) => {
+    switch (status) {
+      case 'active':
+        return 'Running';
+      case 'inactive':
+        return 'Stopped';
+      case 'dead':
+        return 'Dead';
+      default:
+        return 'Unknown';
+    }
   };
 
   if (isLoading) {
@@ -142,59 +173,10 @@ export function Environment() {
           <p className="text-muted-foreground">tmux sessions in this environment</p>
         </div>
         
-        {!showCreateForm ? (
-          <Button onClick={() => setShowCreateForm(true)}>
-            <Plus className="h-4 w-4 mr-2" />
-            New Session
-          </Button>
-        ) : (
-          <Card className="w-80">
-            <CardHeader className="pb-3">
-              <CardTitle className="text-lg">Create New Session</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div>
-                <label className="text-sm font-medium">Session Name (optional)</label>
-                <input
-                  type="text"
-                  value={newSessionName}
-                  onChange={(e) => setNewSessionName(e.target.value)}
-                  placeholder="main, feature-branch, etc."
-                  className="w-full mt-1 px-3 py-2 border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-ring"
-                />
-              </div>
-              <div>
-                <label className="text-sm font-medium">Working Directory</label>
-                <input
-                  type="text"
-                  value={newSessionWorkingDir}
-                  onChange={(e) => setNewSessionWorkingDir(e.target.value)}
-                  placeholder="/workspace"
-                  className="w-full mt-1 px-3 py-2 border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-ring"
-                />
-              </div>
-              <div className="flex gap-2">
-                <Button 
-                  onClick={handleCreateSession}
-                  disabled={createSessionMutation.isPending}
-                  className="flex-1"
-                >
-                  {createSessionMutation.isPending ? 'Creating...' : 'Create'}
-                </Button>
-                <Button 
-                  variant="outline" 
-                  onClick={() => {
-                    setShowCreateForm(false);
-                    setNewSessionName('');
-                    setNewSessionWorkingDir('/workspace');
-                  }}
-                >
-                  Cancel
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        )}
+        <Button onClick={() => setShowCreateDialog(true)}>
+          <Plus className="h-4 w-4 mr-2" />
+          New Session
+        </Button>
       </div>
 
       {sessions.length > 0 ? (
@@ -220,12 +202,9 @@ export function Environment() {
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="flex items-center gap-2">
-                  <div className={`h-2 w-2 rounded-full ${
-                    session.status === 'active' ? 'bg-green-500' : 
-                    session.status === 'inactive' ? 'bg-yellow-500' : 'bg-red-500'
-                  }`} />
-                  <span className="text-sm text-muted-foreground capitalize">
-                    {session.status}
+                  <div className={`h-2 w-2 rounded-full ${getStatusColor(session.status)}`} />
+                  <span className="text-sm text-muted-foreground">
+                    {getStatusText(session.status)}
                   </span>
                 </div>
                 
@@ -242,14 +221,27 @@ export function Environment() {
                     <Terminal className="h-4 w-4 mr-2" />
                     Connect
                   </Button>
-                  <Button
-                    onClick={() => deleteSessionMutation.mutate(session.id)}
-                    disabled={deleteSessionMutation.isPending}
-                    variant="destructive"
-                    size="icon"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button variant="ghost" size="icon">
+                        <Settings className="h-4 w-4" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      <DropdownMenuItem>
+                        <Play className="mr-2 h-4 w-4" />
+                        Start Session
+                      </DropdownMenuItem>
+                                             <DropdownMenuItem>
+                         <Square className="mr-2 h-4 w-4" />
+                         Stop Session
+                       </DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => deleteSessionMutation.mutate(session.id)} className="text-red-600">
+                        <Trash2 className="mr-2 h-4 w-4" />
+                        Delete Session
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                 </div>
               </CardContent>
             </Card>
@@ -263,13 +255,62 @@ export function Environment() {
             <p className="text-muted-foreground mb-6">
               Create your first terminal session in this environment
             </p>
-            <Button onClick={() => setShowCreateForm(true)}>
+            <Button onClick={() => setShowCreateDialog(true)}>
               <Plus className="h-4 w-4 mr-2" />
               Create Session
             </Button>
           </CardContent>
         </Card>
       )}
+
+      {/* Create Session Dialog */}
+      <Dialog open={showCreateDialog} onOpenChange={setShowCreateDialog}>
+        <DialogContent className="sm:max-w-[425px]">
+          <DialogHeader>
+            <DialogTitle>Create New Session</DialogTitle>
+            <DialogDescription>
+              Create a new terminal session in this environment.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="grid grid-cols-4 items-center gap-4">
+              <Label htmlFor="session-name" className="text-right">
+                Name
+              </Label>
+              <Input
+                id="session-name"
+                value={newSessionName}
+                onChange={(e) => setNewSessionName(e.target.value)}
+                placeholder="main, feature-branch, etc."
+                className="col-span-3"
+              />
+            </div>
+            <div className="grid grid-cols-4 items-center gap-4">
+              <Label htmlFor="working-dir" className="text-right">
+                Working Dir
+              </Label>
+              <Input
+                id="working-dir"
+                value={newSessionWorkingDir}
+                onChange={(e) => setNewSessionWorkingDir(e.target.value)}
+                placeholder="/workspace"
+                className="col-span-3"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowCreateDialog(false)}>
+              Cancel
+            </Button>
+            <Button 
+              onClick={handleCreateSession}
+              disabled={createSessionMutation.isPending}
+            >
+              {createSessionMutation.isPending ? 'Creating...' : 'Create Session'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

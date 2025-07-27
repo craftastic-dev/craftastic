@@ -8,14 +8,28 @@ const docker = new Docker({
 export interface SandboxOptions {
   sessionId: string;
   userId: string;
+  environmentName?: string;
+  sessionName?: string;
 }
 
 export async function createSandbox(options: SandboxOptions) {
-  const { sessionId, userId } = options;
+  const { sessionId, userId, environmentName, sessionName } = options;
+  
+  // Build a descriptive container name
+  const nameParts = ['craftastic'];
+  if (environmentName) {
+    nameParts.push(environmentName.replace(/[^a-zA-Z0-9-]/g, '-').toLowerCase());
+  }
+  if (sessionName) {
+    nameParts.push(sessionName.replace(/[^a-zA-Z0-9-]/g, '-').toLowerCase());
+  }
+  nameParts.push(sessionId.substring(0, 8));
+  
+  const containerName = nameParts.join('-');
   
   const container = await docker.createContainer({
     Image: config.SANDBOX_IMAGE,
-    name: `sandbox-${sessionId}`,
+    name: containerName,
     Cmd: ['/bin/sh'],
     Tty: true,
     AttachStdin: true,
@@ -33,6 +47,8 @@ export async function createSandbox(options: SandboxOptions) {
     Labels: {
       'craftastic.session': sessionId,
       'craftastic.user': userId,
+      'craftastic.environment': environmentName || '',
+      'craftastic.session-name': sessionName || '',
     },
     WorkingDir: '/workspace',
     Env: [

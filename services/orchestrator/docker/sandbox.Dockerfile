@@ -29,7 +29,17 @@ RUN apk add --no-cache \
     yarn \
     fzf \
     the_silver_searcher \
-    ctags
+    ctags \
+    ncurses \
+    ncurses-terminfo \
+    ncurses-terminfo-base \
+    less
+
+# Set up locale for proper UTF-8 support
+ENV LANG=en_US.UTF-8
+ENV LC_ALL=en_US.UTF-8
+
+# Remove custom terminfo - use system defaults instead
 
 # Verify Neovim version is 0.9.0+
 RUN nvim --version | head -n 1 && \
@@ -66,50 +76,42 @@ RUN LV_BRANCH='release-1.4/neovim-0.9' bash <(curl -s https://raw.githubusercont
 # Add LunarVim to PATH
 ENV PATH="/home/appuser/.local/bin:$PATH"
 
-# Create tmux config with sensible defaults
-RUN echo '# Tmux configuration\n\
-set -g default-terminal "screen-256color"\n\
-set -g mouse on\n\
-set -g prefix C-a\n\
-unbind C-b\n\
-bind C-a send-prefix\n\
-\n\
-# Enable true colors\n\
-set -ga terminal-overrides ",xterm-256color:Tc"\n\
-\n\
-# Set scrollback buffer size\n\
-set -g history-limit 50000\n\
-\n\
-# Enable focus events\n\
-set -g focus-events on\n\
-\n\
-# No delay for escape key\n\
-set -sg escape-time 0\n\
-\n\
-# Split panes using | and -\n\
-bind | split-window -h\n\
-bind - split-window -v\n\
-unbind '"'"'"\n\
-unbind %\n\
-\n\
-# Switch panes using Alt-arrow without prefix\n\
-bind -n M-Left select-pane -L\n\
-bind -n M-Right select-pane -R\n\
-bind -n M-Up select-pane -U\n\
-bind -n M-Down select-pane -D\n\
-\n\
-# Reload config file\n\
-bind r source-file ~/.tmux.conf \\; display-message "Config reloaded!"\n\
-\n\
-# Start windows and panes at 1, not 0\n\
-set -g base-index 1\n\
-setw -g pane-base-index 1\n\
-\n\
-# Status bar customization\n\
-set -g status-bg black\n\
-set -g status-fg white\n\
-set -g status-left "#[fg=green]#S "\n\
-set -g status-right "#[fg=yellow]#(whoami)@#h"' > /home/appuser/.tmux.conf
+# Create minimal tmux config - vanilla approach
+RUN cat > /home/appuser/.tmux.conf << 'EOF'
+# Minimal tmux configuration for xterm.js compatibility
+# Use standard xterm-256color (no custom terminfo)
+set -g default-terminal "xterm-256color"
+
+# Only essential true color support
+set -sa terminal-overrides ',xterm-256color:RGB'
+
+# Basic settings
+set -g mouse on
+set -g history-limit 50000
+set -sg escape-time 0
+
+# Simple key bindings
+set -g prefix C-a
+unbind C-b
+bind C-a send-prefix
+
+# Split panes
+bind | split-window -h
+bind - split-window -v
+unbind '"'
+unbind %
+
+# Reload config
+bind r source-file ~/.tmux.conf \; display-message "Config reloaded!"
+
+# Start at 1
+set -g base-index 1
+setw -g pane-base-index 1
+
+# Simple status bar
+set -g status-left "[#S] "
+set -g status-right "%H:%M"
+EOF
 
 # Create a nice bash profile
 RUN echo '# Bash configuration\n\
@@ -144,6 +146,19 @@ echo "💾 Your tmux session persists across reconnections!"\n\
 echo "🔑 Tmux prefix: Ctrl+A (use Ctrl+A ? for help)"\n\
 echo "🤖 Use '"'"'claude'"'"' or '"'"'cc'"'"' for Claude Code CLI"\n\
 echo ""' > /home/appuser/.bashrc
+
+# Create minimal neovim configuration
+RUN mkdir -p /home/appuser/.config/nvim && \
+    cat > /home/appuser/.config/nvim/init.lua << 'EOF'
+-- Minimal neovim configuration for terminal compatibility
+-- Let neovim handle cursor automatically (don't override guicursor)
+
+-- Let neovim detect terminal capabilities automatically
+-- No manual termguicolors setting - let neovim decide
+EOF
+
+# Set ownership of nvim config
+RUN chown -R appuser:appgroup /home/appuser/.config
 
 # Set default command to bash with login shell
 CMD ["/bin/bash", "-l"]

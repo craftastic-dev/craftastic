@@ -7,3 +7,54 @@ body {
   margin: 0;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
 }
+
+/* Terminal container styles */
+.xterm {
+  height: 100% !important;
+  width: 100% !important;
+  flex: 1 !important;
+  display: flex !important;
+  flex-direction: column !important;
+  position: relative !important;
+  overflow: hidden !important;
+}
+
+.xterm-viewport {
+  overflow-y: hidden !important; /* Hide scrollbars to avoid width changes */
+  flex: 1 !important;
+  position: relative !important;
+  scrollbar-width: none; /* Firefox */
+}
+
+/* Hide scrollbars for WebKit-based browsers */
+.xterm-viewport::-webkit-scrollbar {
+  display: none;
+}
+
+.xterm-screen {
+  width: 100% !important;
+  height: 100% !important;
+  flex: 1 !important;
+  position: relative !important;
+}
+
+.xterm-cursor {
+  display: inline-block !important;
+}
+
+/* Ensure terminal container takes full available space */
+.terminal-container {
+  display: flex !important;
+  flex-direction: column !important;
+  height: 100% !important;
+  width: 100% !important;
+  min-height: 0 !important;
+  min-width: 0 !important;
+  position: relative !important;
+  overflow: hidden !important;
+}
+
+/* Prevent any dynamic resizing of terminal elements */
+.xterm * {
+  box-sizing: border-box !important;
+}

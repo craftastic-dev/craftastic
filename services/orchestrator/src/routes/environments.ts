@@ -56,6 +56,7 @@ export async function environmentRoutes(fastify: FastifyInstance) {
       const container = await createSandbox({
         sessionId: environment.id, // Use environment ID as session ID for now
         userId,
+        environmentName: name,
       });
       
       // Update environment with container ID

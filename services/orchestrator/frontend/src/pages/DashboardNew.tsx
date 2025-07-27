@@ -1,22 +1,34 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, Link } from 'react-router-dom';
-import { Code, GitBranch, GitFork, Play, Plus, Power, Settings } from "lucide-react"
+import { Code, GitBranch, GitFork, Play, Plus, Power, Settings, X } from "lucide-react"
 import { api } from '../api/client';
 import type { Environment } from '../api/client';
+import { useCreateEnvironment } from '../components/AppSidebar';
 
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
 
 export function DashboardNew() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const [userId] = useState(() => localStorage.getItem('userId') || `user-${Date.now()}`);
+  const [userId] = useState(() => {
+    const stored = localStorage.getItem('userId');
+    if (!stored) {
+      const newUserId = `user-${Date.now()}`;
+      localStorage.setItem('userId', newUserId);
+      return newUserId;
+    }
+    return stored;
+  });
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, refetch } = useQuery({
     queryKey: ['environments', userId],
     queryFn: () => api.getUserEnvironments(userId),
   });
@@ -25,24 +37,34 @@ export function DashboardNew() {
     mutationFn: ({ name, repositoryUrl }: { name: string; repositoryUrl?: string }) => 
       api.createEnvironment(userId, name, repositoryUrl),
     onSuccess: (environment) => {
-      queryClient.invalidateQueries({ queryKey: ['environments'] });
+      console.log('Environment created successfully:', environment);
+      // Invalidate all environment queries for this user
+      queryClient.invalidateQueries({ queryKey: ['environments', userId] });
+      // Also refetch the data immediately
+      refetch();
       navigate(`/environment/${environment.id}`);
+    },
+    onError: (error) => {
+      console.error('Error creating environment:', error);
     },
   });
 
   const deleteMutation = useMutation({
     mutationFn: (environmentId: string) => api.deleteEnvironment(environmentId),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['environments'] });
+      queryClient.invalidateQueries({ queryKey: ['environments', userId] });
+      refetch();
     },
   });
 
-  const [showCreateForm, setShowCreateForm] = useState(false);
+  const { showCreateDialog, setShowCreateDialog } = useCreateEnvironment();
   const [newEnvironmentName, setNewEnvironmentName] = useState('');
   const [newEnvironmentRepo, setNewEnvironmentRepo] = useState('');
 
   const handleCreateEnvironment = () => {
     if (!newEnvironmentName.trim()) return;
+    
+    console.log('Creating environment:', { name: newEnvironmentName.trim(), repositoryUrl: newEnvironmentRepo.trim() || undefined });
     
     createMutation.mutate({
       name: newEnvironmentName.trim(),
@@ -51,10 +73,12 @@ export function DashboardNew() {
     
     setNewEnvironmentName('');
     setNewEnvironmentRepo('');
-    setShowCreateForm(false);
+    setShowCreateDialog(false);
   };
 
   const environments = data?.environments || [];
+
+  console.log('DashboardNew render:', { userId, environmentsCount: environments.length, isLoading });
 
   return (
     <div className="container mx-auto p-6">
@@ -77,11 +101,9 @@ export function DashboardNew() {
               ))}
             </SelectContent>
           </Select>
-          <Button asChild>
-            <Link to="/environments/new">
-              <Plus className="mr-2 h-4 w-4" />
-              Create Environment
-            </Link>
+          <Button onClick={() => setShowCreateDialog(true)}>
+            <Plus className="mr-2 h-4 w-4" />
+            Create Environment
           </Button>
         </div>
       </div>
@@ -117,11 +139,9 @@ export function DashboardNew() {
             <div className="flex flex-col items-center justify-center p-8 text-center">
               <h3 className="text-lg font-semibold mb-2">No environments yet</h3>
               <p className="text-muted-foreground mb-6">Create your first development environment to get started</p>
-              <Button asChild>
-                <Link to="/environments/new">
-                  <Plus className="mr-2 h-4 w-4" />
-                  Create Environment
-                </Link>
+              <Button onClick={() => setShowCreateDialog(true)}>
+                <Plus className="mr-2 h-4 w-4" />
+                Create Environment
               </Button>
             </div>
           )}
@@ -172,16 +192,63 @@ export function DashboardNew() {
             <div className="flex flex-col items-center justify-center p-8 text-center">
               <h3 className="text-lg font-semibold mb-2">No environments yet</h3>
               <p className="text-muted-foreground mb-6">Create your first development environment to get started</p>
-              <Button asChild>
-                <Link to="/environments/new">
-                  <Plus className="mr-2 h-4 w-4" />
-                  Create Environment
-                </Link>
+              <Button onClick={() => setShowCreateDialog(true)}>
+                <Plus className="mr-2 h-4 w-4" />
+                Create Environment
               </Button>
             </div>
           )}
         </TabsContent>
       </Tabs>
+
+      {/* Create Environment Dialog */}
+      <Dialog open={showCreateDialog} onOpenChange={setShowCreateDialog}>
+        <DialogContent className="sm:max-w-[425px]">
+          <DialogHeader>
+            <DialogTitle>Create New Environment</DialogTitle>
+            <DialogDescription>
+              Create a new development environment with optional Git repository.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="grid grid-cols-4 items-center gap-4">
+              <Label htmlFor="name" className="text-right">
+                Name
+              </Label>
+              <Input
+                id="name"
+                value={newEnvironmentName}
+                onChange={(e) => setNewEnvironmentName(e.target.value)}
+                placeholder="my-project"
+                className="col-span-3"
+              />
+            </div>
+            <div className="grid grid-cols-4 items-center gap-4">
+              <Label htmlFor="repository" className="text-right">
+                Repository
+              </Label>
+              <Input
+                id="repository"
+                value={newEnvironmentRepo}
+                onChange={(e) => setNewEnvironmentRepo(e.target.value)}
+                placeholder="https://github.com/user/repo.git"
+                className="col-span-3"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowCreateDialog(false)}>
+              Cancel
+            </Button>
+            <Button 
+              onClick={handleCreateEnvironment}
+              disabled={!newEnvironmentName.trim() || createMutation.isPending}
+            >
+              {createMutation.isPending ? 'Creating...' : 'Create Environment'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

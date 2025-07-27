@@ -1,6 +1,7 @@
 import { spawn } from 'node-pty';
 import { getDocker } from './docker';
 import { EventEmitter } from 'events';
+import { Writable } from 'stream';
 
 export interface TerminalSession extends EventEmitter {
   id: string;
@@ -33,9 +34,10 @@ export async function createTerminalSession(
     Tty: true,
     Cmd: tmuxCmd,
     Env: [
-      'TERM=xterm-256color', // Ensure proper terminal type
-      'LANG=en_US.UTF-8',     // Set UTF-8 encoding
-      'LC_ALL=en_US.UTF-8'
+      'TERM=xterm-256color',   // Match frontend xterm.js terminal type
+      'LANG=en_US.UTF-8',      // Set UTF-8 encoding
+      'LC_ALL=en_US.UTF-8',
+      'COLORTERM=truecolor'    // Enable true color support
     ]
   });
 
@@ -50,9 +52,9 @@ export async function createTerminalSession(
 
   session.resize = async (cols: number, rows: number) => {
     try {
+      console.log(`Resizing terminal to ${cols}x${rows}`);
       await exec.resize({ h: rows, w: cols });
-      // Send terminal resize escape sequence to ensure the shell gets the update
-      stream.write(`\x1b[8;${rows};${cols}t`);
+      // Don't send manual resize escape sequence - Docker exec API handles this
     } catch (error) {
       console.error('Failed to resize terminal:', error);
     }
@@ -67,9 +69,23 @@ export async function createTerminalSession(
     sessions.delete(sessionId);
   };
 
-  stream.on('data', (chunk: Buffer) => {
-    session.emit('data', chunk.toString());
+  // Use dockerode's demuxStream to handle Docker's multiplexed streams properly
+  const stdout = new Writable({
+    write(chunk, encoding, callback) {
+      session.emit('data', chunk.toString());
+      callback();
+    }
   });
+  
+  const stderr = new Writable({
+    write(chunk, encoding, callback) {
+      session.emit('data', chunk.toString());
+      callback();
+    }
+  });
+  
+  // Demultiplex the Docker stream
+  docker.modem.demuxStream(stream, stdout, stderr);
 
   stream.on('error', (err: Error) => {
     session.emit('error', err);

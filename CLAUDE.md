@@ -187,6 +187,7 @@ CORS_ORIGIN=*
 - **Docker Integration**: Direct Dockerode usage for container lifecycle
 - **tmux Sessions**: Persistent terminal sessions within containers
 - **Sandbox Security**: Limited container capabilities and resource constraints
+- **Terminal Configuration**: Custom sandbox.Dockerfile with tmux-256color support and terminal fixes
 
 ### Frontend Architecture
 - **Component-First**: Reusable shadcn/ui components
@@ -209,6 +210,11 @@ CORS_ORIGIN=*
 - **Container Security**: Sandbox containers have restricted capabilities
 - **Real-time Updates**: Terminal sessions use WebSocket connections
 - **Error Handling**: Proper error boundaries and user feedback throughout
+- **Terminal Compatibility**: The sandbox.Dockerfile configures tmux and xterm.js for proper rendering in browser terminals
+  - Uses tmux-256color terminfo for better color support
+  - Configures terminal-overrides to handle Unicode width issues with fonts
+  - Enables BCE capability for proper scrolling
+  - xterm.js configured with canvas renderer and Unicode 11 support
 
 ## Debugging
 

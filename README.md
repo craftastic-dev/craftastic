@@ -35,6 +35,8 @@ craftastic/
    - Neovim with LunarVim configuration
    - Claude Code CLI
    - Node.js 20 and other language runtimes
+   - Properly configured terminal with tmux-256color support
+   - Fixed terminal rendering for browser-based terminals
 
 3. Start infrastructure services:
    ```bash
@@ -78,3 +80,19 @@ This project uses:
 - TypeScript throughout
 - Fastify for the backend API
 - React + Vite for the frontend
+
+## Troubleshooting
+
+### Terminal Display Issues
+
+If you experience terminal rendering problems (duplicate status bars, escape characters, etc.), the sandbox Docker image includes fixes for common browser terminal issues:
+
+1. **Duplicate tmux status bar**: Fixed by configuring proper Unicode width handling with `terminal-overrides` in tmux config
+2. **Scrolling issues**: BCE (Background Color Erase) capability is enabled
+3. **Color/glyph issues**: Uses `tmux-256color` terminfo with proper configuration
+4. **Font rendering**: xterm.js is configured with Unicode 11 support and canvas renderer
+
+To rebuild the sandbox image with the latest terminal fixes:
+```bash
+docker build -f services/orchestrator/docker/sandbox.Dockerfile -t craftastic-sandbox:latest .
+```
