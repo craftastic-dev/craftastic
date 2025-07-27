@@ -16,7 +16,7 @@ RUN npm ci
 # Copy source code
 COPY . .
 
-# Build the application
+# Build the application (this now includes frontend build)
 RUN npm run build
 
 # Production stage
@@ -26,7 +26,7 @@ WORKDIR /app
 
 # Copy built application
 COPY --from=base /app/services/orchestrator/dist ./dist
-COPY --from=base /app/services/orchestrator/frontend/dist ./frontend/dist
+COPY --from=base /app/services/orchestrator/dist-frontend ./frontend/dist
 COPY --from=base /app/services/orchestrator/package.json ./
 
 # Install production dependencies only

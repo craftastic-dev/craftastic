@@ -16,11 +16,11 @@ export async function setupViteDev(server: FastifyInstance) {
       middlewareMode: true,
       hmr: false // Completely disable HMR to fix the duplicate injection issue
     },
-    plugins: [react()],
+    plugins: [react()] as any,
     appType: 'spa',
     resolve: {
       alias: {
-        '@': frontendRoot + '/src',
+        '@': join(frontendRoot, 'src'),
       },
     },
     optimizeDeps: {
@@ -38,7 +38,7 @@ export async function setupViteDev(server: FastifyInstance) {
       ]
     },
     clearScreen: false,
-    logLevel: 'error' // Reduce Vite logging noise
+    logLevel: 'info' // Increase logging to debug issues
   });
 
   // Handle frontend routes with Vite (avoiding conflict with CORS)

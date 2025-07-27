@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
-import { Plus, Terminal, Trash2, User, GitBranch, Folder, Play, Square } from 'lucide-react';
+import { Plus, Terminal, Trash2, User, GitBranch, Folder } from 'lucide-react';
 import { api } from '../api/client';
 import type { Environment } from '../api/client';
 import { Button } from '../components/ui/button';
