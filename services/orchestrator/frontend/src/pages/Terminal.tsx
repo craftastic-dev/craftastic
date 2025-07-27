@@ -18,7 +18,7 @@ export function Terminal() {
   const wsRef = useRef<WebSocket | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
   const resizeObserverRef = useRef<ResizeObserver | null>(null);
-  const lastSizeRef = useRef<{ cols: number; rows: number }>({ cols: 0, rows: 0 });
+  const preExpandDimensionsRef = useRef<{ cols: number; rows: number } | null>(null);
   
   const [isExpanded, setIsExpanded] = useState(false);
 
@@ -280,86 +280,86 @@ export function Terminal() {
     };
   }, [sessionId, environmentId]);
 
-  // Handle terminal resize when git panel is toggled or expanded state changes
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      if (fitAddonRef.current && xtermRef.current) {
-        try {
-          fitAddonRef.current.fit();
-          
-          // Force a redraw after fitting
-          xtermRef.current.refresh(0, xtermRef.current.rows - 1);
-          
-          // Send new dimensions to server
-          if (wsRef.current?.readyState === WebSocket.OPEN && xtermRef.current.cols && xtermRef.current.rows) {
-            const dimensions = {
-              type: 'resize',
-              cols: xtermRef.current.cols,
-              rows: xtermRef.current.rows,
-            };
-            console.log('Sending dimensions after layout change:', dimensions);
-            wsRef.current.send(JSON.stringify(dimensions));
-          }
-        } catch (error) {
-          console.error('Error during layout resize:', error);
-        }
-      }
-    }, 200);
+  // Remove duplicate useEffect since we have useLayoutEffect handling this
 
-    return () => clearTimeout(timer);
-  }, [isExpanded]);
-
-  // Immediate refit when expanded state changes
+  // Handle terminal resize when expanded state changes
   useLayoutEffect(() => {
-    console.log('isExpanded changed to:', isExpanded);
-    
-    // Force a layout recalculation first
-    if (terminalRef.current) {
-      terminalRef.current.offsetHeight;
-    }
-    
-    const timer = setTimeout(() => {
-      if (fitAddonRef.current && xtermRef.current && terminalRef.current) {
-        try {
-          // Temporarily hide the terminal to force layout recalculation
-          const originalDisplay = terminalRef.current.style.display;
-          terminalRef.current.style.display = 'none';
-          
-          // Force layout recalculation
-          terminalRef.current.offsetHeight;
-          
-          // Show the terminal again
-          terminalRef.current.style.display = originalDisplay || 'block';
-          
-          const containerRect = terminalRef.current.getBoundingClientRect();
-          console.log('Container dimensions:', containerRect.width, 'x', containerRect.height);
-          
-          if (containerRect.width === 0 || containerRect.height === 0) {
-            console.warn('Container has zero dimensions, skipping fit');
-            return;
-          }
-          
-          console.log('Refitting terminal after state change');
+    if (isExpanded && fitAddonRef.current && xtermRef.current) {
+      // Store dimensions before expanding
+      if (xtermRef.current.cols > 0 && xtermRef.current.rows > 0) {
+        preExpandDimensionsRef.current = {
+          cols: xtermRef.current.cols,
+          rows: xtermRef.current.rows
+        };
+      }
+      
+      // Fit to fullscreen after a delay
+      setTimeout(() => {
+        if (fitAddonRef.current && xtermRef.current) {
           fitAddonRef.current.fit();
-          xtermRef.current.refresh(0, xtermRef.current.rows - 1);
           
-          // Send new dimensions to server
-          if (wsRef.current?.readyState === WebSocket.OPEN && xtermRef.current.cols && xtermRef.current.rows) {
-            const dimensions = {
+          if (wsRef.current?.readyState === WebSocket.OPEN) {
+            wsRef.current.send(JSON.stringify({
               type: 'resize',
               cols: xtermRef.current.cols,
               rows: xtermRef.current.rows,
-            };
-            console.log('Sending dimensions after immediate refit:', dimensions);
-            wsRef.current.send(JSON.stringify(dimensions));
+            }));
           }
-        } catch (error) {
-          console.error('Error during immediate refit:', error);
         }
-      }
-    }, 200);
-
-    return () => clearTimeout(timer);
+      }, 200);
+    } else if (!isExpanded && xtermRef.current && fitAddonRef.current && terminalRef.current) {
+      // Reset to small size to force proper recalculation
+      xtermRef.current.resize(10, 10);
+      
+      // Wait for DOM to settle
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          if (!fitAddonRef.current || !xtermRef.current || !terminalRef.current) return;
+          
+          try {
+            // Restore original dimensions if available
+            if (preExpandDimensionsRef.current?.cols > 0 && preExpandDimensionsRef.current?.rows > 0) {
+              xtermRef.current.resize(
+                preExpandDimensionsRef.current.cols, 
+                preExpandDimensionsRef.current.rows
+              );
+              
+              // Fine-tune with fit addon
+              setTimeout(() => {
+                if (fitAddonRef.current && xtermRef.current) {
+                  fitAddonRef.current.fit();
+                  
+                  if (wsRef.current?.readyState === WebSocket.OPEN) {
+                    wsRef.current.send(JSON.stringify({
+                      type: 'resize',
+                      cols: xtermRef.current.cols,
+                      rows: xtermRef.current.rows,
+                    }));
+                  }
+                  
+                  xtermRef.current.refresh(0, xtermRef.current.rows - 1);
+                }
+              }, 100);
+            } else {
+              // Fallback to fit addon
+              fitAddonRef.current.fit();
+              
+              if (wsRef.current?.readyState === WebSocket.OPEN) {
+                wsRef.current.send(JSON.stringify({
+                  type: 'resize',
+                  cols: xtermRef.current.cols,
+                  rows: xtermRef.current.rows,
+                }));
+              }
+              
+              xtermRef.current.refresh(0, xtermRef.current.rows - 1);
+            }
+          } catch (error) {
+            console.error('Error during resize:', error);
+          }
+        });
+      });
+    }
   }, [isExpanded]);
 
   return (
@@ -370,10 +370,7 @@ export function Terminal() {
           <Button
             variant="outline"
             size="sm"
-            onClick={() => {
-              console.log('Collapse clicked, current isExpanded:', isExpanded);
-              setIsExpanded(!isExpanded);
-            }}
+            onClick={() => setIsExpanded(false)}
             className="bg-background/80 backdrop-blur-sm"
           >
             <Minimize2 className="h-4 w-4 mr-2" />
@@ -392,10 +389,7 @@ export function Terminal() {
             <Button
               variant="outline"
               size="sm"
-              onClick={() => {
-                console.log('Expand clicked, current isExpanded:', isExpanded);
-                setIsExpanded(!isExpanded);
-              }}
+              onClick={() => setIsExpanded(true)}
             >
               <Maximize2 className="h-4 w-4 mr-2" />
               Expand
@@ -413,7 +407,10 @@ export function Terminal() {
         
         {/* Terminal - always present */}
         <div className="flex-1 flex bg-black min-w-0 overflow-hidden basis-0">
-          <div ref={terminalRef} className="flex-1 w-full h-full" />
+          <div 
+            ref={terminalRef} 
+            className="flex-1 w-full h-full"
+          />
         </div>
         
       </div>
