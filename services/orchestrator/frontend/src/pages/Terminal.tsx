@@ -42,13 +42,16 @@ export function Terminal() {
       // Cursor configuration for visibility
       cursorBlink: true,
       cursorStyle: 'block',
+      // Selection settings - enable text selection
+      rightClickSelectsWord: true, // Enable right-click word selection
+      macOptionClickForcesSelection: true, // Help with tmux on macOS
       // Remove potentially problematic settings
       allowProposedApi: false,
       screenReaderMode: false,
       windowsMode: false,
       allowTransparency: false,
-      // Use default renderer
-      rendererType: 'dom', // Switch from canvas to DOM renderer
+      // Use default canvas renderer (DOM renderer has selection bugs)
+      // rendererType: 'dom',
     });
 
     const fitAddon = new FitAddon();

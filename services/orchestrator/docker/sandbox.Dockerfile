@@ -86,9 +86,17 @@ set -g default-terminal "xterm-256color"
 set -sa terminal-overrides ',xterm-256color:RGB'
 
 # Basic settings
-set -g mouse on
+set -g mouse off
 set -g history-limit 50000
 set -sg escape-time 0
+
+# Mouse selection behavior - let xterm.js handle selection
+# Disable tmux copy mode activation via mouse
+set -g @prevent_copy_mode 'on'
+unbind -T root MouseDrag1Pane
+
+# Re-enable basic mouse events but don't enter copy mode
+bind -T root MouseDown1Pane select-pane -t = \; send-keys -M
 
 # Simple key bindings
 set -g prefix C-a
