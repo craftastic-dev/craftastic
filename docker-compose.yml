@@ -1,0 +1,33 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: craftastic
+      POSTGRES_PASSWORD: craftastic
+      POSTGRES_DB: craftastic
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  orchestrator:
+    build: 
+      context: .
+      dockerfile: services/orchestrator/Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_ENV: development
+      PORT: 3000
+      LOG_LEVEL: info
+      DATABASE_URL: postgresql://craftastic:craftastic@postgres:5432/craftastic
+      JWT_SECRET: dev-secret-key
+      CORS_ORIGIN: "*"
+      DOCKER_HOST: /var/run/docker.sock
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      - postgres
+
+volumes:
+  postgres_data:
