@@ -58,7 +58,7 @@ export function DashboardNew() {
   const { showCreateDialog, setShowCreateDialog } = useCreateEnvironment();
   const [newEnvironmentName, setNewEnvironmentName] = useState('');
   const [newEnvironmentRepo, setNewEnvironmentRepo] = useState('');
-  const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
+  const [viewMode, setViewMode] = useState<'grid' | 'list'>('list');
 
   const handleCreateEnvironment = () => {
     if (!newEnvironmentName.trim()) return;
@@ -96,15 +96,6 @@ export function DashboardNew() {
         <div className="flex items-center justify-between">
           <div className="flex items-center border rounded-lg p-1">
             <Button
-              variant={viewMode === 'grid' ? 'default' : 'ghost'}
-              size="sm"
-              onClick={() => setViewMode('grid')}
-              className="h-8 px-3"
-            >
-              <Grid3X3 className="h-4 w-4 mr-1" />
-              Grid
-            </Button>
-            <Button
               variant={viewMode === 'list' ? 'default' : 'ghost'}
               size="sm"
               onClick={() => setViewMode('list')}
@@ -112,6 +103,15 @@ export function DashboardNew() {
             >
               <List className="h-4 w-4 mr-1" />
               List
+            </Button>
+            <Button
+              variant={viewMode === 'grid' ? 'default' : 'ghost'}
+              size="sm"
+              onClick={() => setViewMode('grid')}
+              className="h-8 px-3"
+            >
+              <Grid3X3 className="h-4 w-4 mr-1" />
+              Grid
             </Button>
           </div>
           <div className="flex items-center gap-2">
@@ -129,13 +129,7 @@ export function DashboardNew() {
             <p className="text-muted-foreground">Loading environments...</p>
           </div>
         ) : environments.length > 0 ? (
-          viewMode === 'grid' ? (
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 mt-4">
-              {environments.map((env) => (
-                <EnvironmentCard key={env.id} environment={env} onDelete={deleteMutation.mutate} />
-              ))}
-            </div>
-          ) : (
+          viewMode === 'list' ? (
             <div className="rounded-md border mt-4">
               {environments.map((env, index) => (
                 <div
@@ -169,6 +163,12 @@ export function DashboardNew() {
                     <EnvironmentActions onDelete={() => deleteMutation.mutate(env.id)} />
                   </div>
                 </div>
+              ))}
+            </div>
+          ) : (
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 mt-4">
+              {environments.map((env) => (
+                <EnvironmentCard key={env.id} environment={env} onDelete={deleteMutation.mutate} />
               ))}
             </div>
           )

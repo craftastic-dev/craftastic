@@ -59,7 +59,7 @@ export function Environment() {
   });
 
   const [showCreateDialog, setShowCreateDialog] = useState(false);
-  const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
+  const [viewMode, setViewMode] = useState<'grid' | 'list'>('list');
 
   const handleCreateSession = (data: {
     name?: string;
@@ -210,15 +210,6 @@ export function Environment() {
         <div className="flex items-center gap-2">
           <div className="flex items-center border rounded-lg p-1">
             <Button
-              variant={viewMode === 'grid' ? 'default' : 'ghost'}
-              size="sm"
-              onClick={() => setViewMode('grid')}
-              className="h-8 px-3"
-            >
-              <Grid3X3 className="h-4 w-4 mr-1" />
-              Grid
-            </Button>
-            <Button
               variant={viewMode === 'list' ? 'default' : 'ghost'}
               size="sm"
               onClick={() => setViewMode('list')}
@@ -226,6 +217,15 @@ export function Environment() {
             >
               <List className="h-4 w-4 mr-1" />
               List
+            </Button>
+            <Button
+              variant={viewMode === 'grid' ? 'default' : 'ghost'}
+              size="sm"
+              onClick={() => setViewMode('grid')}
+              className="h-8 px-3"
+            >
+              <Grid3X3 className="h-4 w-4 mr-1" />
+              Grid
             </Button>
           </div>
           
@@ -237,7 +237,75 @@ export function Environment() {
       </div>
 
       {sessions.length > 0 ? (
-        viewMode === 'grid' ? (
+        viewMode === 'list' ? (
+          <Card>
+            <CardContent className="p-0">
+              <div className="space-y-0">
+                {sessions.map((session, index) => (
+                  <div key={session.id} className={`flex items-center justify-between p-4 ${index !== sessions.length - 1 ? 'border-b' : ''}`}>
+                    <div className="flex items-center gap-4 flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <div className={`h-2 w-2 rounded-full ${getStatusColor(session.status)}`} />
+                        <span className="text-2xl">
+                          {getSessionTypeIcon(session.sessionType || 'terminal', session.agentId)}
+                        </span>
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <h3 className="font-semibold truncate">
+                          {session.name || `Session ${session.id.substring(0, 8)}`}
+                        </h3>
+                        <div className="flex items-center gap-4 text-sm text-muted-foreground">
+                          <div className="flex items-center gap-1">
+                            <User className="h-3 w-3" />
+                            <span>tmux: {session.tmuxSessionName}</span>
+                          </div>
+                          <div className="flex items-center gap-1">
+                            <GitBranch className="h-3 w-3" />
+                            <span>{session.workingDirectory}</span>
+                          </div>
+                        </div>
+                      </div>
+                      <div className="text-sm text-muted-foreground">
+                        Created {formatDate(session.createdAt)}
+                      </div>
+                      {getSessionTypeBadge(session.sessionType || 'terminal', session.agentId)}
+                    </div>
+                    <div className="flex items-center gap-2 ml-4">
+                      <Button
+                        onClick={() => navigate(`/terminal/${session.id}?environmentId=${environmentId}`)}
+                        size="sm"
+                      >
+                        <Terminal className="h-4 w-4 mr-2" />
+                        Connect
+                      </Button>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button variant="ghost" size="icon">
+                            <Settings className="h-4 w-4" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem>
+                            <Play className="mr-2 h-4 w-4" />
+                            Start Session
+                          </DropdownMenuItem>
+                          <DropdownMenuItem>
+                            <Square className="mr-2 h-4 w-4" />
+                            Stop Session
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => deleteSessionMutation.mutate(session.id)} className="text-red-600">
+                            <Trash2 className="mr-2 h-4 w-4" />
+                            Delete Session
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {sessions.map((session) => (
             <Card key={session.id} className="relative">
@@ -308,74 +376,6 @@ export function Environment() {
             </Card>
             ))}
           </div>
-        ) : (
-          <Card>
-            <CardContent className="p-0">
-              <div className="space-y-0">
-                {sessions.map((session, index) => (
-                  <div key={session.id} className={`flex items-center justify-between p-4 ${index !== sessions.length - 1 ? 'border-b' : ''}`}>
-                    <div className="flex items-center gap-4 flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <div className={`h-2 w-2 rounded-full ${getStatusColor(session.status)}`} />
-                        <span className="text-2xl">
-                          {getSessionTypeIcon(session.sessionType || 'terminal', session.agentId)}
-                        </span>
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <h3 className="font-semibold truncate">
-                          {session.name || `Session ${session.id.substring(0, 8)}`}
-                        </h3>
-                        <div className="flex items-center gap-4 text-sm text-muted-foreground">
-                          <div className="flex items-center gap-1">
-                            <User className="h-3 w-3" />
-                            <span>tmux: {session.tmuxSessionName}</span>
-                          </div>
-                          <div className="flex items-center gap-1">
-                            <GitBranch className="h-3 w-3" />
-                            <span>{session.workingDirectory}</span>
-                          </div>
-                        </div>
-                      </div>
-                      <div className="text-sm text-muted-foreground">
-                        Created {formatDate(session.createdAt)}
-                      </div>
-                      {getSessionTypeBadge(session.sessionType || 'terminal', session.agentId)}
-                    </div>
-                    <div className="flex items-center gap-2 ml-4">
-                      <Button
-                        onClick={() => navigate(`/terminal/${session.id}?environmentId=${environmentId}`)}
-                        size="sm"
-                      >
-                        <Terminal className="h-4 w-4 mr-2" />
-                        Connect
-                      </Button>
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button variant="ghost" size="icon">
-                            <Settings className="h-4 w-4" />
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                          <DropdownMenuItem>
-                            <Play className="mr-2 h-4 w-4" />
-                            Start Session
-                          </DropdownMenuItem>
-                          <DropdownMenuItem>
-                            <Square className="mr-2 h-4 w-4" />
-                            Stop Session
-                          </DropdownMenuItem>
-                          <DropdownMenuItem onClick={() => deleteSessionMutation.mutate(session.id)} className="text-red-600">
-                            <Trash2 className="mr-2 h-4 w-4" />
-                            Delete Session
-                          </DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
         )
       ) : (
         <Card>
