@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom"
-import { Folder, Terminal, Settings, GitBranch, Container } from "lucide-react"
+import { Folder, Terminal, Settings, GitBranch, Container, Bot } from "lucide-react"
 import { useState, createContext, useContext } from "react"
 import { useQuery } from '@tanstack/react-query'
 import { api } from '../api/client'
@@ -83,6 +83,14 @@ export function AppSidebar() {
           <SidebarGroupLabel>Development</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
+              <SidebarMenuItem>
+                <SidebarMenuButton asChild>
+                  <Link to="/agents">
+                    <Bot className="mr-2 h-4 w-4" />
+                    <span>Agents</span>
+                  </Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
               <SidebarMenuItem>
                 <SidebarMenuButton asChild>
                   <Link to="/terminal">

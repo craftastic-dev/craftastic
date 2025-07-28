@@ -7,10 +7,18 @@ export const sessionRoutes: FastifyPluginAsync = async (server) => {
 
   // Create new session
   server.post('/', async (request, reply) => {
-    const { environmentId, name, workingDirectory = '/workspace' } = request.body as {
+    const { 
+      environmentId, 
+      name, 
+      workingDirectory = '/workspace',
+      sessionType = 'terminal',
+      agentId 
+    } = request.body as {
       environmentId: string;
       name?: string;
       workingDirectory?: string;
+      sessionType?: 'terminal' | 'agent';
+      agentId?: string;
     };
 
     try {
@@ -26,9 +34,24 @@ export const sessionRoutes: FastifyPluginAsync = async (server) => {
         return;
       }
 
+      // If it's an agent session, verify the agent exists
+      if (sessionType === 'agent' && agentId) {
+        const agent = await db
+          .selectFrom('agents')
+          .select('id')
+          .where('id', '=', agentId)
+          .executeTakeFirst();
+
+        if (!agent) {
+          reply.code(404).send({ error: 'Agent not found' });
+          return;
+        }
+      }
+
       // Generate unique tmux session name
       const timestamp = Date.now();
-      const tmuxSessionName = name ? `${name}-${timestamp}` : `session-${timestamp}`;
+      const tmuxSessionName = name ? `${name}-${timestamp}` : 
+        sessionType === 'agent' ? `agent-${timestamp}` : `session-${timestamp}`;
 
       // Create session record
       const sessionData = await db
@@ -39,6 +62,8 @@ export const sessionRoutes: FastifyPluginAsync = async (server) => {
           tmux_session_name: tmuxSessionName,
           working_directory: workingDirectory,
           status: 'inactive',
+          session_type: sessionType,
+          agent_id: agentId || null,
         })
         .returningAll()
         .executeTakeFirstOrThrow();
@@ -53,6 +78,8 @@ export const sessionRoutes: FastifyPluginAsync = async (server) => {
         createdAt: sessionData.created_at.toISOString(),
         updatedAt: sessionData.updated_at.toISOString(),
         lastActivity: sessionData.last_activity?.toISOString(),
+        agentId: sessionData.agent_id,
+        sessionType: sessionData.session_type,
       };
 
       reply.send(session);
@@ -84,6 +111,8 @@ export const sessionRoutes: FastifyPluginAsync = async (server) => {
         createdAt: row.created_at.toISOString(),
         updatedAt: row.updated_at.toISOString(),
         lastActivity: row.last_activity?.toISOString(),
+        agentId: row.agent_id,
+        sessionType: row.session_type,
       }));
       
       reply.send({ sessions: sessionList });
@@ -119,6 +148,8 @@ export const sessionRoutes: FastifyPluginAsync = async (server) => {
         createdAt: row.created_at.toISOString(),
         updatedAt: row.updated_at.toISOString(),
         lastActivity: row.last_activity?.toISOString(),
+        agentId: row.agent_id,
+        sessionType: row.session_type,
       };
       
       reply.send(session);
@@ -159,6 +190,8 @@ export const sessionRoutes: FastifyPluginAsync = async (server) => {
         createdAt: row.created_at.toISOString(),
         updatedAt: row.updated_at.toISOString(),
         lastActivity: row.last_activity?.toISOString(),
+        agentId: row.agent_id,
+        sessionType: row.session_type,
       };
       
       reply.send(session);

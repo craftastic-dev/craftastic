@@ -11,6 +11,7 @@ import { terminalRoutes } from './routes/terminal';
 import { gitRoutes } from './routes/git';
 import { deploymentRoutes } from './routes/deployment';
 import { sessionRoutes } from './routes/sessions';
+import agentRoutes from './routes/agents';
 import { setupDatabase } from './lib/database';
 import { setupViteDev } from './lib/vite-dev';
 
@@ -49,6 +50,7 @@ async function start() {
     server.register(gitRoutes, { prefix: '/api/git' });
     server.register(deploymentRoutes, { prefix: '/api/deployment' });
     server.register(sessionRoutes, { prefix: '/api/sessions' });
+    server.register(agentRoutes, { prefix: '/api/agents' });
 
     await server.listen({ 
       port: config.PORT, 

@@ -23,6 +23,23 @@ export interface Session {
   createdAt: string;
   updatedAt: string;
   lastActivity?: string;
+  agentId?: string;
+  sessionType: 'terminal' | 'agent';
+}
+
+export interface Agent {
+  id: string;
+  userId: string;
+  name: string;
+  type: 'claude-code' | 'gemini-cli' | 'qwen-coder';
+  createdAt: string;
+  updatedAt: string;
+  credential?: AgentCredential;
+}
+
+export interface AgentCredential {
+  type: string; // oauth, anthropic_api_key, gemini_api_key, etc.
+  value: string; // the actual credential value (decrypted when retrieved)
 }
 
 export interface Container {
@@ -68,11 +85,11 @@ export const api = {
   },
 
   // Session management  
-  async createSession(environmentId: string, name?: string, workingDirectory = '/'): Promise<Session> {
+  async createSession(environmentId: string, name?: string, workingDirectory = '/', sessionType: 'terminal' | 'agent' = 'terminal', agentId?: string): Promise<Session> {
     const response = await fetch(`${API_BASE}/sessions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ environmentId, name, workingDirectory }),
+      body: JSON.stringify({ environmentId, name, workingDirectory, sessionType, agentId }),
     });
     
     if (!response.ok) throw new Error('Failed to create session');
@@ -141,6 +158,51 @@ export const api = {
     
     if (!response.ok) throw new Error('Failed to deploy');
     return response.json();
+  },
+
+  // Agent management
+  async createAgent(userId: string, name: string, type: 'claude-code' | 'gemini-cli' | 'qwen-coder', credential?: AgentCredential): Promise<Agent> {
+    const response = await fetch(`${API_BASE}/agents`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId, name, type, credential }),
+    });
+    
+    if (!response.ok) throw new Error('Failed to create agent');
+    return response.json();
+  },
+
+  async getUserAgents(userId: string): Promise<{ agents: Agent[] }> {
+    const response = await fetch(`${API_BASE}/agents/user/${userId}`);
+    
+    if (!response.ok) throw new Error('Failed to get agents');
+    return response.json();
+  },
+
+  async getAgent(agentId: string): Promise<Agent> {
+    const response = await fetch(`${API_BASE}/agents/${agentId}`);
+    
+    if (!response.ok) throw new Error('Failed to get agent');
+    return response.json();
+  },
+
+  async updateAgent(agentId: string, updates: { name?: string, credential?: AgentCredential }): Promise<Agent> {
+    const response = await fetch(`${API_BASE}/agents/${agentId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(updates),
+    });
+    
+    if (!response.ok) throw new Error('Failed to update agent');
+    return response.json();
+  },
+
+  async deleteAgent(agentId: string): Promise<void> {
+    const response = await fetch(`${API_BASE}/agents/${agentId}`, {
+      method: 'DELETE',
+    });
+    
+    if (!response.ok) throw new Error('Failed to delete agent');
   },
 
   // Legacy container methods (for backward compatibility during transition)

@@ -1,16 +1,14 @@
 import { useState } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Plus, Terminal, Trash2, ArrowLeft, GitBranch, Folder, Clock, Play, Square, Settings } from 'lucide-react';
+import { Plus, Terminal, Trash2, ArrowLeft, GitBranch, Folder, Clock, Play, Square, Settings, Bot } from 'lucide-react';
 import { api } from '../api/client';
 import type { Environment as EnvironmentType, Session } from '../api/client';
 import { Button } from '../components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '../components/ui/dialog';
-import { Input } from '../components/ui/input';
-import { Label } from '../components/ui/label';
 import { Badge } from '../components/ui/badge';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '../components/ui/dropdown-menu';
+import { CreateSessionDialog } from '../components/CreateSessionDialog';
 
 export function Environment() {
   const { environmentId } = useParams<{ environmentId: string }>();
@@ -31,12 +29,25 @@ export function Environment() {
     refetchInterval: 5000,
   });
 
+  const { data: agentsData } = useQuery({
+    queryKey: ['agents', userId],
+    queryFn: () => api.getUserAgents(userId),
+  });
+
   const createSessionMutation = useMutation({
-    mutationFn: ({ name, workingDirectory }: { name?: string; workingDirectory?: string }) =>
-      api.createSession(environmentId!, name, workingDirectory),
+    mutationFn: ({ name, workingDirectory, sessionType, agentId }: { 
+      name?: string; 
+      workingDirectory?: string; 
+      sessionType?: 'terminal' | 'agent';
+      agentId?: string;
+    }) =>
+      api.createSession(environmentId!, name, workingDirectory, sessionType, agentId),
     onSuccess: (session) => {
       queryClient.invalidateQueries({ queryKey: ['sessions', environmentId] });
       navigate(`/terminal/${session.id}?environmentId=${environmentId}`);
+    },
+    onError: (error) => {
+      console.error('Failed to create session:', error);
     },
   });
 
@@ -48,17 +59,14 @@ export function Environment() {
   });
 
   const [showCreateDialog, setShowCreateDialog] = useState(false);
-  const [newSessionName, setNewSessionName] = useState('');
-  const [newSessionWorkingDir, setNewSessionWorkingDir] = useState('/workspace');
 
-  const handleCreateSession = () => {
-    createSessionMutation.mutate({
-      name: newSessionName.trim() || undefined,
-      workingDirectory: newSessionWorkingDir.trim(),
-    });
-    
-    setNewSessionName('');
-    setNewSessionWorkingDir('/workspace');
+  const handleCreateSession = (data: {
+    name?: string;
+    workingDirectory: string;
+    sessionType: 'terminal' | 'agent';
+    agentId?: string;
+  }) => {
+    createSessionMutation.mutate(data);
     setShowCreateDialog(false);
   };
 
@@ -118,6 +126,31 @@ export function Environment() {
   }
 
   const sessions = sessionsData?.sessions || [];
+  const agents = agentsData?.agents || [];
+  
+  const getSessionTypeIcon = (sessionType?: string, agentId?: string | null) => {
+    if (sessionType === 'agent' && agentId && agents.length > 0) {
+      const agent = agents.find((a: any) => a.id === agentId);
+      if (agent) {
+        switch (agent.type) {
+          case 'claude-code': return '🤖';
+          case 'gemini-cli': return '💎';
+          case 'qwen-coder': return '🧠';
+          default: return <Bot className="h-4 w-4" />;
+        }
+      }
+      return <Bot className="h-4 w-4" />;
+    }
+    return <Terminal className="h-4 w-4" />;
+  };
+  
+  const getSessionTypeBadge = (sessionType?: string, agentId?: string | null) => {
+    if (sessionType === 'agent' && agentId && agents.length > 0) {
+      const agent = agents.find((a: any) => a.id === agentId);
+      return <Badge variant="secondary">{agent?.name || 'Agent'}</Badge>;
+    }
+    return <Badge variant="outline">Terminal</Badge>;
+  };
 
   return (
     <div className="max-w-6xl mx-auto p-6 space-y-6">
@@ -185,7 +218,7 @@ export function Environment() {
             <Card key={session.id} className="relative">
               <CardHeader>
                 <CardTitle className="flex items-center gap-2 text-lg">
-                  <Terminal className="h-5 w-5" />
+                  {getSessionTypeIcon(session.sessionType || 'terminal', session.agentId)}
                   {session.name || `Session ${session.id.substring(0, 8)}`}
                 </CardTitle>
                 <CardDescription>
@@ -201,11 +234,14 @@ export function Environment() {
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
-                <div className="flex items-center gap-2">
-                  <div className={`h-2 w-2 rounded-full ${getStatusColor(session.status)}`} />
-                  <span className="text-sm text-muted-foreground">
-                    {getStatusText(session.status)}
-                  </span>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <div className={`h-2 w-2 rounded-full ${getStatusColor(session.status)}`} />
+                    <span className="text-sm text-muted-foreground">
+                      {getStatusText(session.status)}
+                    </span>
+                  </div>
+                  {getSessionTypeBadge(session.sessionType || 'terminal', session.agentId)}
                 </div>
                 
                 <div className="text-xs text-muted-foreground flex items-center gap-1">
@@ -263,54 +299,13 @@ export function Environment() {
         </Card>
       )}
 
-      {/* Create Session Dialog */}
-      <Dialog open={showCreateDialog} onOpenChange={setShowCreateDialog}>
-        <DialogContent className="sm:max-w-[425px]">
-          <DialogHeader>
-            <DialogTitle>Create New Session</DialogTitle>
-            <DialogDescription>
-              Create a new terminal session in this environment.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="grid gap-4 py-4">
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="session-name" className="text-right">
-                Name
-              </Label>
-              <Input
-                id="session-name"
-                value={newSessionName}
-                onChange={(e) => setNewSessionName(e.target.value)}
-                placeholder="main, feature-branch, etc."
-                className="col-span-3"
-              />
-            </div>
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="working-dir" className="text-right">
-                Working Dir
-              </Label>
-              <Input
-                id="working-dir"
-                value={newSessionWorkingDir}
-                onChange={(e) => setNewSessionWorkingDir(e.target.value)}
-                placeholder="/workspace"
-                className="col-span-3"
-              />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setShowCreateDialog(false)}>
-              Cancel
-            </Button>
-            <Button 
-              onClick={handleCreateSession}
-              disabled={createSessionMutation.isPending}
-            >
-              {createSessionMutation.isPending ? 'Creating...' : 'Create Session'}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <CreateSessionDialog
+        open={showCreateDialog}
+        onOpenChange={setShowCreateDialog}
+        onCreateSession={handleCreateSession}
+        agents={agents}
+        isCreating={createSessionMutation.isPending}
+      />
     </div>
   );
 }

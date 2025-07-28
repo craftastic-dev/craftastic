@@ -8,6 +8,8 @@ import { TopNavigation } from './components/TopNavigation';
 import { DashboardNew } from './pages/DashboardNew';
 import { Environment } from './pages/Environment';
 import { Terminal } from './pages/Terminal';
+import { Agents } from './pages/Agents';
+import { Toaster } from './components/ui/toaster';
 import './App.css';
 
 const queryClient = new QueryClient();
@@ -28,6 +30,7 @@ function App() {
                   <main className="flex-1 overflow-auto">
                     <Routes>
                       <Route path="/" element={<DashboardNew />} />
+                      <Route path="/agents" element={<Agents />} />
                       <Route path="/environment/:environmentId" element={<Environment />} />
                       <Route path="/terminal/:sessionId" element={<Terminal />} />
                     </Routes>
@@ -43,6 +46,7 @@ function App() {
                 </div>
               </div>
             </SidebarProvider>
+            <Toaster />
           </BrowserRouter>
         </CreateEnvironmentContext.Provider>
       </ThemeProvider>

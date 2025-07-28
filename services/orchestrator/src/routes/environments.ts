@@ -24,6 +24,8 @@ export interface Session {
   createdAt: string;
   updatedAt: string;
   lastActivity?: string;
+  agentId?: string;
+  sessionType: 'terminal' | 'agent';
 }
 
 export async function environmentRoutes(fastify: FastifyInstance) {

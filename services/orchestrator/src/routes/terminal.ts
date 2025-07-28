@@ -29,6 +29,8 @@ export const terminalRoutes: FastifyPluginAsync = async (server) => {
           's.created_at',
           's.updated_at',
           's.last_activity',
+          's.session_type',
+          's.agent_id',
           'e.container_id'
         ])
         .where('s.id', '=', sessionId)
@@ -46,6 +48,81 @@ export const terminalRoutes: FastifyPluginAsync = async (server) => {
         return;
       }
 
+      // Handle agent sessions differently
+      if (sessionWithEnv.session_type === 'agent') {
+        if (!sessionWithEnv.agent_id) {
+          connection.socket.close(1008, 'Agent session requires agent ID');
+          return;
+        }
+
+        // Get agent information and credentials
+        const agent = await db
+          .selectFrom('agents')
+          .select(['id', 'name', 'type'])
+          .where('id', '=', sessionWithEnv.agent_id)
+          .executeTakeFirst();
+
+        if (!agent) {
+          connection.socket.close(1008, 'Agent not found');
+          return;
+        }
+
+        // For now, send a message that we're starting the agent
+        // TODO: Implement actual agent process startup
+        connection.socket.send(JSON.stringify({
+          type: 'output',
+          data: `\r\n🤖 Starting ${agent.name} (${agent.type}) agent...\r\n`
+        }));
+
+        connection.socket.send(JSON.stringify({
+          type: 'output',
+          data: `📋 Agent Session Details:\r\n`
+        }));
+
+        connection.socket.send(JSON.stringify({
+          type: 'output',
+          data: `   Name: ${agent.name}\r\n`
+        }));
+
+        connection.socket.send(JSON.stringify({
+          type: 'output',
+          data: `   Type: ${agent.type}\r\n`
+        }));
+
+        connection.socket.send(JSON.stringify({
+          type: 'output',
+          data: `   Working Directory: ${sessionWithEnv.working_directory}\r\n`
+        }));
+
+        connection.socket.send(JSON.stringify({
+          type: 'output',
+          data: `\r\n🚧 Agent process startup not yet implemented.\r\n`
+        }));
+
+        connection.socket.send(JSON.stringify({
+          type: 'output',
+          data: `💡 This will eventually start the actual agent process with loaded credentials.\r\n\r\n`
+        }));
+
+        // Keep connection alive for demonstration
+        connection.socket.on('message', (message: Buffer) => {
+          try {
+            const parsed = JSON.parse(message.toString());
+            if (parsed.type === 'input') {
+              connection.socket.send(JSON.stringify({
+                type: 'output',
+                data: `Agent received: ${parsed.data}`
+              }));
+            }
+          } catch (error) {
+            console.error('WebSocket message error:', error);
+          }
+        });
+
+        return;
+      }
+
+      // Regular terminal session
       const terminal = await createTerminalSession(sessionId, containerId, sessionWithEnv.tmux_session_name);
 
       terminal.on('data', (data: string) => {
