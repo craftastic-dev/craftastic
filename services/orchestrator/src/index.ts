@@ -8,7 +8,7 @@ import { config } from './config';
 import { containerRoutes } from './routes/containers';
 import { environmentRoutes } from './routes/environments';
 import { terminalRoutes } from './routes/terminal';
-import { gitRoutes } from './routes/git';
+import gitRoutes from './routes/git';
 import { deploymentRoutes } from './routes/deployment';
 import { sessionRoutes } from './routes/sessions';
 import agentRoutes from './routes/agents';
@@ -35,6 +35,16 @@ async function start() {
 
     await server.register(websocket);
 
+    // Development authentication bypass for testing
+    if (config.NODE_ENV === 'development') {
+      server.addHook('preHandler', async (request, reply) => {
+        // Allow test authentication via header in development
+        if (request.headers['x-test-user-id']) {
+          request.user = { id: request.headers['x-test-user-id'] };
+        }
+      });
+    }
+
     if (config.NODE_ENV === 'production') {
       await server.register(fastifyStatic, {
         root: join(__dirname, '../frontend/dist'),
@@ -47,7 +57,7 @@ async function start() {
     server.register(containerRoutes, { prefix: '/api/containers' });
     server.register(environmentRoutes, { prefix: '/api' });
     server.register(terminalRoutes, { prefix: '/api/terminal' });
-    server.register(gitRoutes, { prefix: '/api/git' });
+    server.register(gitRoutes);
     server.register(deploymentRoutes, { prefix: '/api/deployment' });
     server.register(sessionRoutes, { prefix: '/api/sessions' });
     server.register(agentRoutes, { prefix: '/api/agents' });

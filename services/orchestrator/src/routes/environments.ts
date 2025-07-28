@@ -1,6 +1,7 @@
 import { FastifyInstance } from 'fastify';
 import { getDatabase } from '../lib/kysely';
 import { createSandbox, destroySandbox } from '../services/docker';
+import { userService } from '../services/user';
 
 export interface Environment {
   id: string;
@@ -41,11 +42,14 @@ export async function environmentRoutes(fastify: FastifyInstance) {
     };
 
     try {
+      // Resolve user ID (handles both UUID and legacy formats)
+      const resolvedUserId = await userService.resolveUserId(userId);
+      
       // Create environment record
       const environment = await db
         .insertInto('environments')
         .values({
-          user_id: userId,
+          user_id: resolvedUserId,
           name,
           repository_url: repositoryUrl || null,
           branch,
@@ -97,11 +101,14 @@ export async function environmentRoutes(fastify: FastifyInstance) {
     const { userId } = request.params as { userId: string };
 
     try {
+      // Resolve the user ID to handle both legacy and UUID formats
+      const resolvedUserId = await userService.resolveUserId(userId);
+      
       // First get all environments for the user
       const environmentRows = await db
         .selectFrom('environments')
         .selectAll()
-        .where('user_id', '=', userId)
+        .where('user_id', '=', resolvedUserId)
         .orderBy('created_at', 'desc')
         .execute();
 

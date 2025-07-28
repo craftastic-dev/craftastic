@@ -24,7 +24,7 @@ export async function createTerminalSession(
   const actualTmuxName = tmuxSessionName || `session-${sessionId.substring(0, 8)}`;
   const tmuxCmd = [
     '/bin/bash', '-c',
-    `tmux has-session -t ${actualTmuxName} 2>/dev/null && tmux attach-session -t ${actualTmuxName} || tmux new-session -s ${actualTmuxName}`
+    `tmux has-session -t ${actualTmuxName} 2>/dev/null && tmux attach-session -t ${actualTmuxName} || (tmux new-session -d -s ${actualTmuxName} && tmux attach-session -t ${actualTmuxName})`
   ];
 
   const exec = await docker.getContainer(containerId).exec({
