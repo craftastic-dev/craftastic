@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState, useLayoutEffect } from 'react';
 import { useParams, useSearchParams, useNavigate } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
 import { Terminal as XTerm } from 'xterm';
 import { FitAddon } from 'xterm-addon-fit';
 import { WebLinksAddon } from 'xterm-addon-web-links';
 import { Maximize2, Minimize2, ArrowLeft } from 'lucide-react';
 import 'xterm/css/xterm.css';
 import { Button } from '../components/ui/button';
+import { api } from '../api/client';
 
 export function Terminal() {
   const { sessionId } = useParams<{ sessionId: string }>();
@@ -21,6 +23,13 @@ export function Terminal() {
   const preExpandDimensionsRef = useRef<{ cols: number; rows: number } | null>(null);
   
   const [isExpanded, setIsExpanded] = useState(false);
+
+  // Fetch session data to get the name
+  const { data: sessionData } = useQuery({
+    queryKey: ['session', sessionId],
+    queryFn: () => api.getSession(sessionId!),
+    enabled: !!sessionId,
+  });
 
   useEffect(() => {
     if (!terminalRef.current || !sessionId || !environmentId) return;
@@ -412,7 +421,7 @@ export function Terminal() {
               <ArrowLeft className="h-4 w-4" />
             </Button>
             <h2 className="text-lg font-semibold">
-              Terminal - Session: {sessionId?.substring(0, 8)}
+              Terminal - {sessionData?.name || `Session ${sessionId?.substring(0, 8)}`}
             </h2>
           </div>
           <div className="flex items-center gap-2">
