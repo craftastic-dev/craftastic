@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState, useLayoutEffect } from 'react';
-import { useParams, useSearchParams } from 'react-router-dom';
+import { useParams, useSearchParams, useNavigate } from 'react-router-dom';
 import { Terminal as XTerm } from 'xterm';
 import { FitAddon } from 'xterm-addon-fit';
 import { WebLinksAddon } from 'xterm-addon-web-links';
-import { Maximize2, Minimize2 } from 'lucide-react';
+import { Maximize2, Minimize2, ArrowLeft } from 'lucide-react';
 import 'xterm/css/xterm.css';
 import { SessionList } from '../components/SessionList';
 import { Button } from '../components/ui/button';
@@ -11,6 +11,7 @@ import { Button } from '../components/ui/button';
 export function Terminal() {
   const { sessionId } = useParams<{ sessionId: string }>();
   const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
   const environmentId = searchParams.get('environmentId');
   
   const terminalRef = useRef<HTMLDivElement>(null);
@@ -382,9 +383,19 @@ export function Terminal() {
       {/* Header - only show when not expanded */}
       {!isExpanded && (
         <div className="h-14 border-b border-border flex items-center justify-between px-4 bg-background">
-          <h2 className="text-lg font-semibold">
-            Terminal - Session: {sessionId?.substring(0, 8)}
-          </h2>
+          <div className="flex items-center gap-3">
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => navigate(`/environment/${environmentId}`)}
+              className="h-8 w-8"
+            >
+              <ArrowLeft className="h-4 w-4" />
+            </Button>
+            <h2 className="text-lg font-semibold">
+              Terminal - Session: {sessionId?.substring(0, 8)}
+            </h2>
+          </div>
           <div className="flex items-center gap-2">
             <Button
               variant="outline"
