@@ -86,10 +86,6 @@ export function DashboardNew() {
           <h1 className="text-3xl font-bold tracking-tight">Environments</h1>
           <p className="text-muted-foreground">Manage your development environments and sessions.</p>
         </div>
-        <Button onClick={() => setShowCreateDialog(true)}>
-          <Plus className="mr-2 h-4 w-4" />
-          Create Environment
-        </Button>
       </div>
 
       <div className="mt-6">
@@ -120,6 +116,10 @@ export function DashboardNew() {
             </Button>
             <Button variant="outline" size="sm">
               Sort
+            </Button>
+            <Button onClick={() => setShowCreateDialog(true)}>
+              <Plus className="mr-2 h-4 w-4" />
+              Create Environment
             </Button>
           </div>
         </div>
