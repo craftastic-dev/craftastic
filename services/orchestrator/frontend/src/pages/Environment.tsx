@@ -242,7 +242,11 @@ export function Environment() {
             <CardContent className="p-0">
               <div className="space-y-0">
                 {sessions.map((session, index) => (
-                  <div key={session.id} className={`flex items-center justify-between p-4 ${index !== sessions.length - 1 ? 'border-b' : ''}`}>
+                  <div 
+                    key={session.id} 
+                    className={`flex items-center justify-between p-4 hover:bg-accent/50 transition-colors cursor-pointer ${index !== sessions.length - 1 ? 'border-b' : ''}`}
+                    onClick={() => navigate(`/terminal/${session.id}?environmentId=${environmentId}`)}
+                  >
                     <div className="flex items-center gap-4 flex-1 min-w-0">
                       <div className="flex items-center gap-2">
                         <div className={`h-2 w-2 rounded-full ${getStatusColor(session.status)}`} />
@@ -270,7 +274,7 @@ export function Environment() {
                       </div>
                       {getSessionTypeBadge(session.sessionType || 'terminal', session.agentId)}
                     </div>
-                    <div className="flex items-center gap-2 ml-4">
+                    <div className="flex items-center gap-2 ml-4" onClick={(e) => e.stopPropagation()}>
                       <Button
                         onClick={() => navigate(`/terminal/${session.id}?environmentId=${environmentId}`)}
                         size="sm"

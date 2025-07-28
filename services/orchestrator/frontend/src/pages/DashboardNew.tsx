@@ -132,18 +132,19 @@ export function DashboardNew() {
           viewMode === 'list' ? (
             <div className="rounded-md border mt-4">
               {environments.map((env, index) => (
-                <div
+                <Link
                   key={env.id}
-                  className={`flex items-center justify-between p-4 ${
+                  to={`/environment/${env.id}`}
+                  className={`flex items-center justify-between p-4 hover:bg-accent/50 transition-colors cursor-pointer ${
                     index !== environments.length - 1 ? "border-b" : ""
                   }`}
                 >
                   <div className="flex items-center gap-4">
                     <StatusIndicator status={env.status} />
                     <div>
-                      <Link to={`/environment/${env.id}`} className="font-medium hover:underline">
+                      <div className="font-medium">
                         {env.name}
-                      </Link>
+                      </div>
                       <div className="flex items-center gap-4 text-sm text-muted-foreground">
                         <div className="flex items-center gap-1">
                           <GitFork className="h-3.5 w-3.5" />
@@ -160,9 +161,11 @@ export function DashboardNew() {
                     <div className="text-sm text-muted-foreground">
                       Last active: {env.status === 'running' ? '2 hours ago' : env.status === 'starting' ? '5 minutes ago' : '1 day ago'}
                     </div>
-                    <EnvironmentActions onDelete={() => deleteMutation.mutate(env.id)} />
+                    <div onClick={(e) => e.preventDefault()}>
+                      <EnvironmentActions onDelete={() => deleteMutation.mutate(env.id)} />
+                    </div>
                   </div>
-                </div>
+                </Link>
               ))}
             </div>
           ) : (
