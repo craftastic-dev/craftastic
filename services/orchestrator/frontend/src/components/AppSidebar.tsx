@@ -1,6 +1,8 @@
 import { Link } from "react-router-dom"
-import { Folder, Terminal, Settings, GitBranch } from "lucide-react"
+import { Folder, Terminal, Settings, GitBranch, Container } from "lucide-react"
 import { useState, createContext, useContext } from "react"
+import { useQuery } from '@tanstack/react-query'
+import { api } from '../api/client'
 
 import { Sidebar, SidebarContent, SidebarFooter, SidebarGroup, SidebarGroupContent, SidebarGroupLabel, SidebarMenu, SidebarMenuButton, SidebarMenuItem } from "@/components/ui/sidebar"
 
@@ -18,6 +20,36 @@ export const useCreateEnvironment = () => useContext(CreateEnvironmentContext);
 export function AppSidebar() {
   const { setShowCreateDialog } = useCreateEnvironment();
 
+  const [userId] = useState(() => {
+    const stored = localStorage.getItem('userId');
+    if (!stored) {
+      const newUserId = `user-${Date.now()}`;
+      localStorage.setItem('userId', newUserId);
+      return newUserId;
+    }
+    return stored;
+  });
+
+  const { data: environmentsData } = useQuery({
+    queryKey: ['environments', userId],
+    queryFn: () => api.getUserEnvironments(userId),
+  });
+
+  const environments = environmentsData?.environments || [];
+
+  const getStatusIndicator = (status: string) => {
+    switch (status) {
+      case 'running':
+        return <span className="ml-auto h-2 w-2 rounded-full bg-green-500"></span>;
+      case 'starting':
+        return <span className="ml-auto h-2 w-2 rounded-full bg-yellow-500"></span>;
+      case 'stopped':
+        return <span className="ml-auto h-2 w-2 rounded-full bg-gray-400"></span>;
+      default:
+        return <span className="ml-auto h-2 w-2 rounded-full bg-red-500"></span>;
+    }
+  };
+
   return (
     <Sidebar>
       <SidebarContent>
@@ -33,6 +65,17 @@ export function AppSidebar() {
                   </Link>
                 </SidebarMenuButton>
               </SidebarMenuItem>
+              {environments.map((env) => (
+                <SidebarMenuItem key={env.id}>
+                  <SidebarMenuButton asChild>
+                    <Link to={`/environment/${env.id}`}>
+                      <Container className="mr-2 h-4 w-4" />
+                      <span className="truncate">{env.name}</span>
+                      {getStatusIndicator(env.status)}
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              ))}
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>

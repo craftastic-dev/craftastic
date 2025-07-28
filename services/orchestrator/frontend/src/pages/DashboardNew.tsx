@@ -10,7 +10,6 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -87,25 +86,10 @@ export function DashboardNew() {
           <h1 className="text-3xl font-bold tracking-tight">Environments</h1>
           <p className="text-muted-foreground">Manage your development environments and terminal sessions.</p>
         </div>
-        <div className="flex items-center gap-4">
-          <Select defaultValue="all">
-            <SelectTrigger className="w-[200px]">
-              <SelectValue placeholder="Current Environment" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Environments</SelectItem>
-              {environments.map((env) => (
-                <SelectItem key={env.id} value={env.id}>
-                  {env.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Button onClick={() => setShowCreateDialog(true)}>
-            <Plus className="mr-2 h-4 w-4" />
-            Create Environment
-          </Button>
-        </div>
+        <Button onClick={() => setShowCreateDialog(true)}>
+          <Plus className="mr-2 h-4 w-4" />
+          Create Environment
+        </Button>
       </div>
 
       <Tabs defaultValue="grid" className="mt-6">

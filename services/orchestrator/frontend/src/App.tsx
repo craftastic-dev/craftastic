@@ -39,8 +39,6 @@ function App() {
                       <span className="h-2 w-2 rounded-full bg-green-500"></span>
                       <span>Connected</span>
                     </div>
-                    <div className="h-4 w-px bg-border"></div>
-                    <div>No active session</div>
                   </div>
                 </div>
               </div>
