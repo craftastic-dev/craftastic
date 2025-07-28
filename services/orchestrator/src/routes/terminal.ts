@@ -122,7 +122,7 @@ export const terminalRoutes: FastifyPluginAsync = async (server) => {
         return;
       }
 
-      // Regular terminal session
+      // Regular session
       const terminal = await createTerminalSession(sessionId, containerId, sessionWithEnv.tmux_session_name);
 
       terminal.on('data', (data: string) => {
@@ -165,7 +165,7 @@ export const terminalRoutes: FastifyPluginAsync = async (server) => {
       });
 
     } catch (error) {
-      connection.socket.close(1011, 'Failed to create terminal session');
+      connection.socket.close(1011, 'Failed to create session');
     }
   });
 };

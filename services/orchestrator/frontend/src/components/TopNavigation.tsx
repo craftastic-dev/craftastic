@@ -21,7 +21,7 @@ export function TopNavigation() {
       <div className="flex items-center gap-2">
         <Link to="/" className="flex items-center gap-2 font-semibold">
           <Github className="h-5 w-5" />
-          <span>Craftastic Orchestrator</span>
+          <span>Craftastic</span>
         </Link>
       </div>
       <div className="ml-auto flex items-center gap-2">

@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, Link } from 'react-router-dom';
-import { Code, GitBranch, GitFork, Play, Plus, Power, Settings, X } from "lucide-react"
+import { Code, GitBranch, GitFork, Play, Plus, Power, Settings, X, Grid3X3, List } from "lucide-react"
 import { api } from '../api/client';
 import type { Environment } from '../api/client';
 import { useCreateEnvironment } from '../components/AppSidebar';
@@ -9,7 +9,6 @@ import { useCreateEnvironment } from '../components/AppSidebar';
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -59,6 +58,7 @@ export function DashboardNew() {
   const { showCreateDialog, setShowCreateDialog } = useCreateEnvironment();
   const [newEnvironmentName, setNewEnvironmentName] = useState('');
   const [newEnvironmentRepo, setNewEnvironmentRepo] = useState('');
+  const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
 
   const handleCreateEnvironment = () => {
     if (!newEnvironmentName.trim()) return;
@@ -84,7 +84,7 @@ export function DashboardNew() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Environments</h1>
-          <p className="text-muted-foreground">Manage your development environments and terminal sessions.</p>
+          <p className="text-muted-foreground">Manage your development environments and sessions.</p>
         </div>
         <Button onClick={() => setShowCreateDialog(true)}>
           <Plus className="mr-2 h-4 w-4" />
@@ -92,12 +92,28 @@ export function DashboardNew() {
         </Button>
       </div>
 
-      <Tabs defaultValue="grid" className="mt-6">
+      <div className="mt-6">
         <div className="flex items-center justify-between">
-          <TabsList>
-            <TabsTrigger value="grid">Grid</TabsTrigger>
-            <TabsTrigger value="list">List</TabsTrigger>
-          </TabsList>
+          <div className="flex items-center border rounded-lg p-1">
+            <Button
+              variant={viewMode === 'grid' ? 'default' : 'ghost'}
+              size="sm"
+              onClick={() => setViewMode('grid')}
+              className="h-8 px-3"
+            >
+              <Grid3X3 className="h-4 w-4 mr-1" />
+              Grid
+            </Button>
+            <Button
+              variant={viewMode === 'list' ? 'default' : 'ghost'}
+              size="sm"
+              onClick={() => setViewMode('list')}
+              className="h-8 px-3"
+            >
+              <List className="h-4 w-4 mr-1" />
+              List
+            </Button>
+          </div>
           <div className="flex items-center gap-2">
             <Button variant="outline" size="sm">
               Filter
@@ -108,36 +124,19 @@ export function DashboardNew() {
           </div>
         </div>
 
-        <TabsContent value="grid" className="mt-4">
-          {isLoading ? (
-            <div className="flex items-center justify-center p-8">
-              <p className="text-muted-foreground">Loading environments...</p>
-            </div>
-          ) : environments.length > 0 ? (
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        {isLoading ? (
+          <div className="flex items-center justify-center p-8 mt-4">
+            <p className="text-muted-foreground">Loading environments...</p>
+          </div>
+        ) : environments.length > 0 ? (
+          viewMode === 'grid' ? (
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 mt-4">
               {environments.map((env) => (
                 <EnvironmentCard key={env.id} environment={env} onDelete={deleteMutation.mutate} />
               ))}
             </div>
           ) : (
-            <div className="flex flex-col items-center justify-center p-8 text-center">
-              <h3 className="text-lg font-semibold mb-2">No environments yet</h3>
-              <p className="text-muted-foreground mb-6">Create your first development environment to get started</p>
-              <Button onClick={() => setShowCreateDialog(true)}>
-                <Plus className="mr-2 h-4 w-4" />
-                Create Environment
-              </Button>
-            </div>
-          )}
-        </TabsContent>
-
-        <TabsContent value="list" className="mt-4">
-          {isLoading ? (
-            <div className="flex items-center justify-center p-8">
-              <p className="text-muted-foreground">Loading environments...</p>
-            </div>
-          ) : environments.length > 0 ? (
-            <div className="rounded-md border">
+            <div className="rounded-md border mt-4">
               {environments.map((env, index) => (
                 <div
                   key={env.id}
@@ -172,18 +171,18 @@ export function DashboardNew() {
                 </div>
               ))}
             </div>
-          ) : (
-            <div className="flex flex-col items-center justify-center p-8 text-center">
-              <h3 className="text-lg font-semibold mb-2">No environments yet</h3>
-              <p className="text-muted-foreground mb-6">Create your first development environment to get started</p>
-              <Button onClick={() => setShowCreateDialog(true)}>
-                <Plus className="mr-2 h-4 w-4" />
-                Create Environment
-              </Button>
-            </div>
-          )}
-        </TabsContent>
-      </Tabs>
+          )
+        ) : (
+          <div className="flex flex-col items-center justify-center p-8 text-center mt-4">
+            <h3 className="text-lg font-semibold mb-2">No environments yet</h3>
+            <p className="text-muted-foreground mb-6">Create your first development environment to get started</p>
+            <Button onClick={() => setShowCreateDialog(true)}>
+              <Plus className="mr-2 h-4 w-4" />
+              Create Environment
+            </Button>
+          </div>
+        )}
+      </div>
 
       {/* Create Environment Dialog */}
       <Dialog open={showCreateDialog} onOpenChange={setShowCreateDialog}>

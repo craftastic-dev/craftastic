@@ -5,7 +5,6 @@ import { FitAddon } from 'xterm-addon-fit';
 import { WebLinksAddon } from 'xterm-addon-web-links';
 import { Maximize2, Minimize2, ArrowLeft } from 'lucide-react';
 import 'xterm/css/xterm.css';
-import { SessionList } from '../components/SessionList';
 import { Button } from '../components/ui/button';
 
 export function Terminal() {
@@ -108,11 +107,17 @@ export function Terminal() {
     if (document?.fonts?.ready) {
       document.fonts.ready.then(() => {
         fitTerminal();
+        // Focus terminal after initial setup
+        term.focus();
+        console.log('Terminal focused after fonts loaded');
       });
     } else {
       // Fallback for browsers without Font Loading API
       requestAnimationFrame(() => {
         fitTerminal();
+        // Focus terminal after initial setup
+        term.focus();
+        console.log('Terminal focused after initial setup');
       });
     }
 
@@ -141,6 +146,10 @@ export function Terminal() {
                   rows: xtermRef.current.rows,
                 }));
               }
+
+              // Auto-focus the terminal when WebSocket connects
+              xtermRef.current.focus();
+              console.log('Terminal focused automatically');
             } catch (error) {
               console.error('Error during initial setup:', error);
             }
@@ -306,6 +315,10 @@ export function Terminal() {
               rows: xtermRef.current.rows,
             }));
           }
+          
+          // Focus terminal after expanding
+          xtermRef.current.focus();
+          console.log('Terminal focused after expanding');
         }
       }, 200);
     } else if (!isExpanded && xtermRef.current && fitAddonRef.current && terminalRef.current) {
@@ -339,6 +352,9 @@ export function Terminal() {
                   }
                   
                   xtermRef.current.refresh(0, xtermRef.current.rows - 1);
+                  
+                  // Re-focus terminal after resize
+                  xtermRef.current.focus();
                 }
               }, 100);
             } else {
@@ -354,6 +370,9 @@ export function Terminal() {
               }
               
               xtermRef.current.refresh(0, xtermRef.current.rows - 1);
+              
+              // Re-focus terminal after resize
+              xtermRef.current.focus();
             }
           } catch (error) {
             console.error('Error during resize:', error);
@@ -411,19 +430,13 @@ export function Terminal() {
       
       {/* Main Content */}
       <div className="flex-1 flex overflow-hidden min-w-0">
-        {/* Sessions Sidebar - only show when not expanded */}
-        {environmentId && !isExpanded && (
-          <SessionList environmentId={environmentId} />
-        )}
-        
-        {/* Terminal - always present */}
-        <div className="flex-1 flex bg-black min-w-0 overflow-hidden basis-0">
+        {/* Terminal - full width */}
+        <div className="flex-1 flex bg-black min-w-0 overflow-hidden">
           <div 
             ref={terminalRef} 
             className="flex-1 w-full h-full"
           />
         </div>
-        
       </div>
     </div>
   );
