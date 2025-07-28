@@ -1,8 +1,7 @@
 import { Link } from "react-router-dom"
-import { Plus, Folder, Terminal, Settings, GitBranch } from "lucide-react"
+import { Folder, Terminal, Settings, GitBranch } from "lucide-react"
 import { useState, createContext, useContext } from "react"
 
-import { Button } from "@/components/ui/button"
 import { Sidebar, SidebarContent, SidebarFooter, SidebarGroup, SidebarGroupContent, SidebarGroupLabel, SidebarMenu, SidebarMenuButton, SidebarMenuItem } from "@/components/ui/sidebar"
 
 // Create context for sharing create environment dialog state
@@ -77,12 +76,6 @@ export function AppSidebar() {
         </SidebarGroup>
       </SidebarContent>
       <SidebarFooter>
-        <div className="p-2">
-          <Button className="w-full" onClick={() => setShowCreateDialog(true)}>
-            <Plus className="mr-2 h-4 w-4" />
-            New Environment
-          </Button>
-        </div>
       </SidebarFooter>
     </Sidebar>
   )
