@@ -9,7 +9,6 @@ export interface WorktreeConfig {
   sessionId: string;
   repositoryUrl: string;
   branch?: string;
-  isFeatureBranch?: boolean;
 }
 
 export class WorktreeService {
@@ -24,7 +23,7 @@ export class WorktreeService {
    * Create a new worktree for a session
    */
   async createWorktree(config: WorktreeConfig): Promise<string> {
-    const { environmentId, sessionId, repositoryUrl, branch = 'main', isFeatureBranch = false } = config;
+    const { environmentId, sessionId, repositoryUrl, branch = 'main' } = config;
     
     const repoPath = path.join(this.dataDir, 'repos', environmentId);
     const worktreePath = path.join(repoPath, 'worktrees', sessionId);
@@ -42,7 +41,6 @@ export class WorktreeService {
         .set({
           worktree_path: worktreePath,
           git_branch: branch,
-          is_feature_branch: isFeatureBranch,
           updated_at: new Date(),
         })
         .where('id', '=', sessionId)
@@ -89,7 +87,6 @@ export class WorktreeService {
         .set({
           worktree_path: null,
           git_branch: null,
-          is_feature_branch: false,
           updated_at: new Date(),
         })
         .where('id', '=', sessionId)
@@ -191,20 +188,27 @@ export class WorktreeService {
         return null;
       }
 
-      // Get branches
-      const { stdout: branchOutput } = await execPromise(`git -C "${repoPath}" branch -r`);
-      const branches = branchOutput
+      // Get branches from bare repository
+      const { stdout: showRef } = await execPromise(`git -C "${repoPath}" show-ref --heads`);
+      const branches = showRef
         .split('\n')
-        .map(line => line.trim())
-        .filter(line => line && !line.includes('HEAD ->'))
-        .map(line => line.replace('origin/', ''));
+        .filter(line => line.trim())
+        .map(line => line.split(' ')[1])
+        .map(ref => ref.replace('refs/heads/', ''))
+        .filter(branch => branch);
 
-      // Get default branch
-      const { stdout: defaultBranch } = await execPromise(`git -C "${repoPath}" symbolic-ref refs/remotes/origin/HEAD`);
-      const currentBranch = defaultBranch.trim().replace('refs/remotes/origin/', '') || 'main';
+      // Determine default branch
+      let currentBranch = 'main';
+      if (branches.includes('main')) {
+        currentBranch = 'main';
+      } else if (branches.includes('master')) {
+        currentBranch = 'master';
+      } else if (branches.length > 0) {
+        currentBranch = branches[0];
+      }
 
-      // Get remote URL
-      const { stdout: remoteUrl } = await execPromise(`git -C "${repoPath}" remote get-url origin`);
+      // Get remote URL from config
+      const { stdout: remoteUrl } = await execPromise(`git -C "${repoPath}" config --get remote.origin.url`);
 
       return {
         path: repoPath,
@@ -233,11 +237,8 @@ export class WorktreeService {
     // Create parent directory
     await fs.mkdir(path.dirname(repoPath), { recursive: true });
 
-    // Clone as bare repository
-    await execPromise(`git clone --bare "${repositoryUrl}" "${repoPath}/.git"`);
-    
-    // Set up the repository as a bare repo in the main directory
-    await execPromise(`git -C "${repoPath}" config --bool core.bare true`);
+    // Clone as bare repository directly into the target directory
+    await execPromise(`git clone --bare "${repositoryUrl}" "${repoPath}"`);
 
     console.log(`✅ Cloned bare repository for environment ${environmentId}`);
   }
@@ -247,28 +248,47 @@ export class WorktreeService {
     const worktreesDir = path.dirname(worktreePath);
     await fs.mkdir(worktreesDir, { recursive: true });
 
+    // Get available branches from bare repository
+    const { stdout: showRef } = await execPromise(`git -C "${repoPath}" show-ref --heads`);
+    const branches = showRef
+      .split('\n')
+      .filter(line => line.trim())
+      .map(line => line.split(' ')[1])  // Get ref name
+      .map(ref => ref.replace('refs/heads/', ''))  // Remove refs/heads/ prefix
+      .filter(branch => branch);
+
+    console.log(`Available branches: ${branches.join(', ')}`);
+
+    // Determine the default branch
+    let defaultBranch = 'main';
+    if (branches.includes('main')) {
+      defaultBranch = 'main';
+    } else if (branches.includes('master')) {
+      defaultBranch = 'master';
+    } else if (branches.length > 0) {
+      defaultBranch = branches[0];
+    }
+
     // Create the worktree
     try {
-      // Try to create worktree with existing branch
-      await execPromise(`git -C "${repoPath}" worktree add "${worktreePath}" "${branch}"`);
-    } catch (error) {
-      // If branch doesn't exist, create it from origin/main or origin/master
-      const { stdout: remoteDefault } = await execPromise(`git -C "${repoPath}" symbolic-ref refs/remotes/origin/HEAD`).catch(() => ({ stdout: '' }));
-      const defaultBranch = remoteDefault.trim().replace('refs/remotes/origin/', '') || 'main';
-      
-      try {
-        await execPromise(`git -C "${repoPath}" worktree add -b "${branch}" "${worktreePath}" "origin/${defaultBranch}"`);
-      } catch (fallbackError) {
-        // Last resort: try with master
-        await execPromise(`git -C "${repoPath}" worktree add -b "${branch}" "${worktreePath}" "origin/master"`);
+      // If the requested branch exists, check it out
+      if (branches.includes(branch)) {
+        await execPromise(`git -C "${repoPath}" worktree add "${worktreePath}" "${branch}"`);
+      } else {
+        // Create new branch from default branch
+        await execPromise(`git -C "${repoPath}" worktree add -b "${branch}" "${worktreePath}" "${defaultBranch}"`);
       }
+    } catch (error) {
+      console.error(`Failed to create worktree: ${error.message}`);
+      throw error;
     }
   }
 
   private async bareRepoExists(repoPath: string): Promise<boolean> {
     try {
-      const gitDir = path.join(repoPath, '.git');
-      await fs.access(gitDir);
+      // For bare repositories, check for HEAD file directly in the repo path
+      const headFile = path.join(repoPath, 'HEAD');
+      await fs.access(headFile);
       return true;
     } catch {
       return false;

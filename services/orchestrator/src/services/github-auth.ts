@@ -2,9 +2,9 @@ import crypto from 'crypto';
 import { getDatabase } from '../lib/kysely';
 
 // GitHub Device Flow constants
-const GITHUB_DEVICE_CLIENT_ID = '178c6fc778ccc68e1d6a'; // GitHub's official device flow client
+const GITHUB_DEVICE_CLIENT_ID = process.env.GITHUB_CLIENT_ID || 'Ov23liz42T3AzHtmASDC'; // Craftastic shared OAuth app
 const GITHUB_API_BASE = 'https://api.github.com';
-const REQUIRED_SCOPES = ['repo', 'read:user', 'user:email', 'write:pull_request'];
+const REQUIRED_SCOPES = ['repo', 'read:user', 'user:email'];
 
 export interface DeviceAuthResponse {
   device_code: string;
@@ -61,7 +61,14 @@ export class GitHubAuthService {
       });
 
       if (!response.ok) {
-        throw new Error(`GitHub device flow initiation failed: ${response.statusText}`);
+        let errorDetails = response.statusText;
+        try {
+          const errorBody = await response.json();
+          errorDetails = errorBody.error_description || errorBody.error || response.statusText;
+        } catch {
+          // If we can't parse the error body, use the status text
+        }
+        throw new Error(`GitHub device flow initiation failed: ${errorDetails}`);
       }
 
       const data = await response.json();
@@ -96,7 +103,26 @@ export class GitHubAuthService {
           }),
         });
 
-        const data = await response.json();
+        if (!response.ok) {
+          let errorDetails = response.statusText;
+          try {
+            const errorBody = await response.json();
+            errorDetails = errorBody.error_description || errorBody.error || response.statusText;
+          } catch {
+            // If we can't parse the error body, use the status text
+          }
+          throw new Error(`GitHub token polling failed: ${errorDetails}`);
+        }
+
+        let data;
+        try {
+          data = await response.json();
+        } catch (parseError) {
+          console.error('❌ Failed to parse GitHub response as JSON:', parseError);
+          // Can't read response text after trying JSON - log the parse error instead
+          console.error('Parse error details:', parseError.message);
+          throw new Error('GitHub returned invalid JSON response');
+        }
 
         if (data.access_token) {
           console.log('✅ GitHub device authorization completed');

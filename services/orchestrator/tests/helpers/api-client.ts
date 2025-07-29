@@ -80,16 +80,23 @@ export class ApiTestClient {
    */
   async createTestEnvironment(overrides: Partial<{
     name: string;
-    repositoryUrl: string;
+    repositoryUrl: string | undefined;
     branch: string;
   }> = {}) {
-    const response = await this.request('POST', '/api/environments', {
+    const baseConfig = {
       userId: this.testUserId,
       name: 'test-environment',
       repositoryUrl: 'https://github.com/octocat/Hello-World.git',
       branch: 'main',
       ...overrides
-    });
+    };
+    
+    // Remove repositoryUrl if explicitly set to undefined
+    if (overrides.repositoryUrl === undefined) {
+      delete baseConfig.repositoryUrl;
+    }
+    
+    const response = await this.request('POST', '/api/environments', baseConfig);
 
     if (response.status === 200) {
       this.testEnvironmentId = response.body.id;

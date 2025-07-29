@@ -1,5 +1,24 @@
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3000/api';
 
+// Helper function to get common headers including auth
+const getHeaders = (includeContentType: boolean = true, additionalHeaders: Record<string, string> = {}) => {
+  const headers: Record<string, string> = {
+    ...additionalHeaders,
+  };
+  
+  if (includeContentType) {
+    headers['Content-Type'] = 'application/json';
+  }
+  
+  // In development, add test user ID header
+  if (import.meta.env.DEV) {
+    const userId = localStorage.getItem('userId') || `user-${Date.now()}`;
+    headers['x-test-user-id'] = userId;
+  }
+  
+  return headers;
+};
+
 export interface Environment {
   id: string;
   userId: string;
@@ -118,34 +137,170 @@ export const api = {
     if (!response.ok) throw new Error('Failed to delete session');
   },
 
-  // Git operations (now environment-based)
-  async gitCommit(environmentId: string, message: string, files?: string[]): Promise<any> {
-    const response = await fetch(`${API_BASE}/git/commit`, {
+  // GitHub authentication
+  async initiateGitHubAuth(): Promise<{
+    device_code: string;
+    user_code: string;
+    verification_uri: string;
+    expires_in: number;
+    interval: number;
+  }> {
+    const response = await fetch(`${API_BASE}/auth/github/initiate`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ environmentId, message, files }),
+      headers: getHeaders(false), // No Content-Type since no body
     });
     
-    if (!response.ok) throw new Error('Failed to commit');
+    if (!response.ok) throw new Error('Failed to initiate GitHub auth');
+    const result = await response.json();
+    return result.data;
+  },
+
+  async pollGitHubAuth(deviceCode: string, interval?: number): Promise<void> {
+    const response = await fetch(`${API_BASE}/auth/github/poll`, {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify({ deviceCode, interval }),
+    });
+    
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.error || 'Authentication failed');
+    }
+  },
+
+  async disconnectGitHub(): Promise<void> {
+    const response = await fetch(`${API_BASE}/auth/github/disconnect`, {
+      method: 'DELETE',
+      headers: getHeaders(false), // No Content-Type since no body
+    });
+    
+    if (!response.ok) throw new Error('Failed to disconnect GitHub');
+  },
+
+  async getGitHubStatus(): Promise<{ connected: boolean; username?: string }> {
+    const response = await fetch(`${API_BASE}/auth/github/status`, {
+      headers: getHeaders(false), // No Content-Type since no body
+    });
+    
+    if (!response.ok) throw new Error('Failed to get GitHub status');
+    const result = await response.json();
+    return result.data;
+  },
+
+  // Git operations (now session-based)
+  async gitCommit(sessionId: string, message: string, files?: string[]): Promise<any> {
+    const response = await fetch(`${API_BASE}/git/commit/${sessionId}`, {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify({ message, files }),
+    });
+    
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.error || 'Failed to commit');
+    }
     return response.json();
   },
 
-  async gitPush(environmentId: string, branch = 'main'): Promise<any> {
-    const response = await fetch(`${API_BASE}/git/push`, {
+  async gitPush(sessionId: string, remote = 'origin', branch?: string): Promise<any> {
+    const response = await fetch(`${API_BASE}/git/push/${sessionId}`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ environmentId, branch }),
+      headers: getHeaders(),
+      body: JSON.stringify({ remote, branch }),
     });
     
-    if (!response.ok) throw new Error('Failed to push');
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.error || 'Failed to push');
+    }
     return response.json();
   },
 
-  async gitStatus(environmentId: string): Promise<{ files: Array<{ status: string; path: string }> }> {
-    const response = await fetch(`${API_BASE}/git/status/${environmentId}`);
+  async gitStatus(sessionId: string): Promise<{ 
+    branch: string;
+    upstream?: string;
+    ahead: number;
+    behind: number;
+    files: Array<{ 
+      filename: string; 
+      status: string; 
+      staged: boolean; 
+      modified: boolean;
+    }>;
+    clean: boolean;
+  }> {
+    const response = await fetch(`${API_BASE}/git/status/${sessionId}`, {
+      headers: getHeaders(false), // No Content-Type since no body
+    });
     
-    if (!response.ok) throw new Error('Failed to get git status');
-    return response.json();
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.error || 'Failed to get git status');
+    }
+    const result = await response.json();
+    return result.data;
+  },
+
+  async gitDiff(sessionId: string, file?: string, staged?: boolean): Promise<{
+    diff: string;
+    file: string | null;
+    staged: boolean;
+  }> {
+    const params = new URLSearchParams();
+    if (file) params.append('file', file);
+    if (staged) params.append('staged', 'true');
+    
+    const response = await fetch(`${API_BASE}/git/diff/${sessionId}?${params}`, {
+      headers: getHeaders(false), // No Content-Type since no body
+    });
+    
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.error || 'Failed to get git diff');
+    }
+    const result = await response.json();
+    return result.data;
+  },
+
+  async gitLog(sessionId: string, limit = 10, offset = 0): Promise<{
+    commits: Array<{
+      hash: string;
+      author: string;
+      email: string;
+      date: string;
+      message: string;
+    }>;
+    limit: number;
+    offset: number;
+  }> {
+    const response = await fetch(`${API_BASE}/git/log/${sessionId}?limit=${limit}&offset=${offset}`, {
+      headers: getHeaders(false), // No Content-Type since no body
+    });
+    
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.error || 'Failed to get git log');
+    }
+    const result = await response.json();
+    return result.data;
+  },
+
+  async getRepositoryInfo(environmentId: string): Promise<{
+    path: string;
+    branches: string[];
+    currentBranch: string;
+    remoteUrl: string;
+  }> {
+    const response = await fetch(`${API_BASE}/git/repo/${environmentId}`, {
+      headers: getHeaders(false), // No Content-Type since no body
+    });
+    
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.error || 'Failed to get repository info');
+    }
+    const result = await response.json();
+    return result.data;
   },
 
   // Deployment

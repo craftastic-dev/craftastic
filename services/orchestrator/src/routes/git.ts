@@ -65,14 +65,15 @@ export default async function gitRoutes(fastify: FastifyInstance) {
   }>, reply: FastifyReply) => {
     try {
       const { deviceCode, interval = 5 } = request.body;
-      const userId = request.user?.id; // Assuming auth middleware sets this
+      const userId = request.user?.id;
       
       if (!userId) {
         return reply.status(401).send({ success: false, error: 'Unauthorized' });
       }
 
+      const resolvedUserId = await userService.resolveUserId(userId);
       const tokenResponse = await gitHubAuthService.pollForToken(deviceCode, interval);
-      await gitHubAuthService.saveUserToken(userId, tokenResponse);
+      await gitHubAuthService.saveUserToken(resolvedUserId, tokenResponse);
       
       return reply.send({
         success: true,
@@ -94,7 +95,8 @@ export default async function gitRoutes(fastify: FastifyInstance) {
         return reply.status(401).send({ success: false, error: 'Unauthorized' });
       }
 
-      await gitHubAuthService.revokeUserToken(userId);
+      const resolvedUserId = await userService.resolveUserId(userId);
+      await gitHubAuthService.revokeUserToken(resolvedUserId);
       
       return reply.send({
         success: true,
@@ -116,14 +118,15 @@ export default async function gitRoutes(fastify: FastifyInstance) {
         return reply.status(401).send({ success: false, error: 'Unauthorized' });
       }
 
-      const hasValidToken = await gitHubAuthService.hasValidToken(userId);
+      const resolvedUserId = await userService.resolveUserId(userId);
+      const hasValidToken = await gitHubAuthService.hasValidToken(resolvedUserId);
       let username = null;
 
       if (hasValidToken) {
         const user = await getDatabase()
           .selectFrom('users')
           .select('github_username')
-          .where('id', '=', userId)
+          .where('id', '=', resolvedUserId)
           .executeTakeFirst();
         username = user?.github_username;
       }

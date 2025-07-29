@@ -10,10 +10,14 @@ export interface SandboxOptions {
   userId: string;
   environmentName?: string;
   sessionName?: string;
+  worktreeMounts?: Array<{
+    hostPath: string;
+    containerPath: string;
+  }>;
 }
 
 export async function createSandbox(options: SandboxOptions) {
-  const { sessionId, userId, environmentName, sessionName } = options;
+  const { sessionId, userId, environmentName, sessionName, worktreeMounts = [] } = options;
   
   // Build a descriptive container name
   const nameParts = ['craftastic'];
@@ -26,6 +30,9 @@ export async function createSandbox(options: SandboxOptions) {
   nameParts.push(sessionId.substring(0, 8));
   
   const containerName = nameParts.join('-');
+  
+  // Prepare volume mounts
+  const binds = worktreeMounts.map(mount => `${mount.hostPath}:${mount.containerPath}:rw`);
   
   const container = await docker.createContainer({
     Image: config.SANDBOX_IMAGE,
@@ -43,6 +50,7 @@ export async function createSandbox(options: SandboxOptions) {
       CapDrop: ['ALL'],
       CapAdd: ['CHOWN', 'SETUID', 'SETGID'],
       SecurityOpt: ['no-new-privileges'],
+      Binds: binds.length > 0 ? binds : undefined,
     },
     Labels: {
       'craftastic.session': sessionId,

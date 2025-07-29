@@ -2,6 +2,7 @@ import { FastifyInstance } from 'fastify';
 import { getDatabase } from '../lib/kysely';
 import { createSandbox, destroySandbox } from '../services/docker';
 import { userService } from '../services/user';
+import os from 'os';
 
 export interface Environment {
   id: string;
@@ -59,10 +60,16 @@ export async function environmentRoutes(fastify: FastifyInstance) {
         .executeTakeFirstOrThrow();
 
       // Create Docker container for this environment
+      // Mount the craftastic data directory so all worktrees are accessible
+      const dataDir = process.env.CRAFTASTIC_DATA_DIR || os.homedir() + '/.craftastic';
       const container = await createSandbox({
         sessionId: environment.id, // Use environment ID as session ID for now
         userId,
         environmentName: name,
+        worktreeMounts: [{
+          hostPath: dataDir,
+          containerPath: '/data'
+        }]
       });
       
       // Update environment with container ID

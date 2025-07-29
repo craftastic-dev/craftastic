@@ -4,9 +4,10 @@ import { useQuery } from '@tanstack/react-query';
 import { Terminal as XTerm } from 'xterm';
 import { FitAddon } from 'xterm-addon-fit';
 import { WebLinksAddon } from 'xterm-addon-web-links';
-import { Maximize2, Minimize2, ArrowLeft } from 'lucide-react';
+import { Maximize2, Minimize2, ArrowLeft, FileText, PanelRightOpen, PanelRightClose } from 'lucide-react';
 import 'xterm/css/xterm.css';
 import { Button } from '../components/ui/button';
+import { GitPanel } from '../components/GitPanel';
 import { api } from '../api/client';
 
 export function Terminal() {
@@ -23,6 +24,7 @@ export function Terminal() {
   const preExpandDimensionsRef = useRef<{ cols: number; rows: number } | null>(null);
   
   const [isExpanded, setIsExpanded] = useState(false);
+  const [showGitPanel, setShowGitPanel] = useState(false);
 
   // Fetch session data to get the name
   const { data: sessionData } = useQuery({
@@ -428,6 +430,23 @@ export function Terminal() {
             <Button
               variant="outline"
               size="sm"
+              onClick={() => setShowGitPanel(!showGitPanel)}
+            >
+              {showGitPanel ? (
+                <>
+                  <PanelRightClose className="h-4 w-4 mr-2" />
+                  Hide Git
+                </>
+              ) : (
+                <>
+                  <PanelRightOpen className="h-4 w-4 mr-2" />
+                  Show Git
+                </>
+              )}
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
               onClick={() => setIsExpanded(true)}
             >
               <Maximize2 className="h-4 w-4 mr-2" />
@@ -439,13 +458,18 @@ export function Terminal() {
       
       {/* Main Content */}
       <div className="flex-1 flex overflow-hidden min-w-0">
-        {/* Terminal - full width */}
+        {/* Terminal */}
         <div className="flex-1 flex bg-black min-w-0 overflow-hidden">
           <div 
             ref={terminalRef} 
             className="flex-1 w-full h-full"
           />
         </div>
+        
+        {/* Git Panel */}
+        {showGitPanel && !isExpanded && sessionId && environmentId && (
+          <GitPanel sessionId={sessionId} environmentId={environmentId} />
+        )}
       </div>
     </div>
   );

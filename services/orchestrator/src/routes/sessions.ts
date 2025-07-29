@@ -1,6 +1,8 @@
 import { FastifyPluginAsync } from 'fastify';
 import { getDatabase } from '../lib/kysely';
 import { Session } from './environments';
+import { worktreeService } from '../services/worktree';
+import os from 'os';
 
 export const sessionRoutes: FastifyPluginAsync = async (server) => {
   const db = getDatabase();
@@ -68,18 +70,63 @@ export const sessionRoutes: FastifyPluginAsync = async (server) => {
         .returningAll()
         .executeTakeFirstOrThrow();
 
+      // If environment has a repository, create a worktree for this session
+      const environmentDetails = await db
+        .selectFrom('environments')
+        .select(['repository_url', 'branch'])
+        .where('id', '=', environmentId)
+        .executeTakeFirst();
+
+      let finalWorkingDirectory = workingDirectory;
+      if (environmentDetails?.repository_url) {
+        try {
+          const worktreePath = await worktreeService.createWorktree({
+            environmentId,
+            sessionId: sessionData.id,
+            repositoryUrl: environmentDetails.repository_url,
+            branch: environmentDetails.branch || 'main',
+          });
+          // Convert host path to container path (data directory is mounted at /data)
+          const dataDir = process.env.CRAFTASTIC_DATA_DIR || os.homedir() + '/.craftastic';
+          const relativeWorktreePath = worktreePath.replace(dataDir, '');
+          finalWorkingDirectory = `/data${relativeWorktreePath}`;
+          
+          // Update session with the container working directory
+          await db
+            .updateTable('sessions')
+            .set({
+              working_directory: finalWorkingDirectory,
+              updated_at: new Date(),
+            })
+            .where('id', '=', sessionData.id)
+            .execute();
+          
+          console.log(`✅ Created worktree for session ${sessionData.id}: ${worktreePath} -> ${finalWorkingDirectory}`);
+        } catch (error) {
+          console.warn(`⚠️  Failed to create worktree for session ${sessionData.id}:`, error.message);
+          // Don't fail session creation if worktree creation fails
+        }
+      }
+
+      // Refetch the session data to get the updated working directory
+      const updatedSessionData = await db
+        .selectFrom('sessions')
+        .selectAll()
+        .where('id', '=', sessionData.id)
+        .executeTakeFirstOrThrow();
+
       const session: Session = {
-        id: sessionData.id,
-        environmentId: sessionData.environment_id,
-        name: sessionData.name,
-        tmuxSessionName: sessionData.tmux_session_name,
-        workingDirectory: sessionData.working_directory,
-        status: sessionData.status,
-        createdAt: sessionData.created_at.toISOString(),
-        updatedAt: sessionData.updated_at.toISOString(),
-        lastActivity: sessionData.last_activity?.toISOString(),
-        agentId: sessionData.agent_id,
-        sessionType: sessionData.session_type,
+        id: updatedSessionData.id,
+        environmentId: updatedSessionData.environment_id,
+        name: updatedSessionData.name,
+        tmuxSessionName: updatedSessionData.tmux_session_name,
+        workingDirectory: updatedSessionData.working_directory, // Use database value which may have been updated
+        status: updatedSessionData.status,
+        createdAt: updatedSessionData.created_at.toISOString(),
+        updatedAt: updatedSessionData.updated_at.toISOString(),
+        lastActivity: updatedSessionData.last_activity?.toISOString(),
+        agentId: updatedSessionData.agent_id,
+        sessionType: updatedSessionData.session_type,
       };
 
       reply.send(session);
@@ -221,6 +268,17 @@ export const sessionRoutes: FastifyPluginAsync = async (server) => {
       // TODO: Kill the tmux session if it's running
       // This would require executing `tmux kill-session -t ${session.tmux_session_name}` 
       // in the environment's container
+
+      // Clean up worktree if exists
+      if (session.worktree_path) {
+        try {
+          await worktreeService.removeWorktree(session.environment_id, sessionId);
+          console.log(`🧹 Cleaned up worktree for session ${sessionId}`);
+        } catch (error) {
+          console.warn(`⚠️  Failed to cleanup worktree for session ${sessionId}:`, error.message);
+          // Don't fail deletion if worktree cleanup fails
+        }
+      }
 
       // Delete session from database
       await db
