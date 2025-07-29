@@ -10,13 +10,57 @@ const getHeaders = (includeContentType: boolean = true, additionalHeaders: Recor
     headers['Content-Type'] = 'application/json';
   }
   
-  // In development, add test user ID header
-  if (import.meta.env.DEV) {
-    const userId = localStorage.getItem('userId') || `user-${Date.now()}`;
+  // Add JWT token if available
+  const accessToken = localStorage.getItem('accessToken');
+  
+  if (accessToken) {
+    headers['Authorization'] = `Bearer ${accessToken}`;
+  } else if (import.meta.env.DEV) {
+    // Fallback to dev user ID during transition
+    let userId = localStorage.getItem('userId');
+    if (!userId) {
+      userId = `user-${Date.now()}`;
+      localStorage.setItem('userId', userId);
+    }
     headers['x-test-user-id'] = userId;
   }
   
   return headers;
+};
+
+// Helper function to handle API responses with token refresh
+const handleApiResponse = async (response: Response, originalRequest?: () => Promise<Response>): Promise<Response> => {
+  if (response.status === 401 && originalRequest) {
+    // Try to refresh token
+    const refreshToken = localStorage.getItem('refreshToken');
+    if (refreshToken) {
+      try {
+        const refreshResponse = await fetch(`${API_BASE}/auth/refresh`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ refreshToken }),
+        });
+
+        if (refreshResponse.ok) {
+          const result = await refreshResponse.json();
+          localStorage.setItem('accessToken', result.data.accessToken);
+          localStorage.setItem('refreshToken', result.data.refreshToken);
+          
+          // Retry original request
+          return await originalRequest();
+        }
+      } catch (error) {
+        console.error('Token refresh failed:', error);
+      }
+    }
+    
+    // Clear auth and redirect to login
+    localStorage.removeItem('accessToken');
+    localStorage.removeItem('refreshToken');
+    window.location.reload(); // This will show the auth form
+  }
+  
+  return response;
 };
 
 export interface Environment {
@@ -73,7 +117,7 @@ export const api = {
   async createEnvironment(userId: string, name: string, repositoryUrl?: string, branch = 'main'): Promise<Environment> {
     const response = await fetch(`${API_BASE}/environments`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getHeaders(),
       body: JSON.stringify({ userId, name, repositoryUrl, branch }),
     });
     
@@ -82,14 +126,18 @@ export const api = {
   },
 
   async getUserEnvironments(userId: string): Promise<{ environments: Environment[] }> {
-    const response = await fetch(`${API_BASE}/environments/user/${userId}`);
+    const response = await fetch(`${API_BASE}/environments/user/${userId}`, {
+      headers: getHeaders(false),
+    });
     
     if (!response.ok) throw new Error('Failed to get environments');
     return response.json();
   },
 
   async getEnvironment(environmentId: string): Promise<Environment> {
-    const response = await fetch(`${API_BASE}/environments/${environmentId}`);
+    const response = await fetch(`${API_BASE}/environments/${environmentId}`, {
+      headers: getHeaders(false),
+    });
     
     if (!response.ok) throw new Error('Failed to get environment');
     return response.json();
@@ -98,6 +146,7 @@ export const api = {
   async deleteEnvironment(environmentId: string): Promise<void> {
     const response = await fetch(`${API_BASE}/environments/${environmentId}`, {
       method: 'DELETE',
+      headers: getHeaders(false),
     });
     
     if (!response.ok) throw new Error('Failed to delete environment');
@@ -107,7 +156,7 @@ export const api = {
   async createSession(environmentId: string, name?: string, workingDirectory = '/', sessionType: 'terminal' | 'agent' = 'terminal', agentId?: string): Promise<Session> {
     const response = await fetch(`${API_BASE}/sessions`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getHeaders(),
       body: JSON.stringify({ environmentId, name, workingDirectory, sessionType, agentId }),
     });
     
@@ -116,14 +165,18 @@ export const api = {
   },
 
   async getEnvironmentSessions(environmentId: string): Promise<{ sessions: Session[] }> {
-    const response = await fetch(`${API_BASE}/sessions/environment/${environmentId}`);
+    const response = await fetch(`${API_BASE}/sessions/environment/${environmentId}`, {
+      headers: getHeaders(false),
+    });
     
     if (!response.ok) throw new Error('Failed to get sessions');
     return response.json();
   },
 
   async getSession(sessionId: string): Promise<Session> {
-    const response = await fetch(`${API_BASE}/sessions/${sessionId}`);
+    const response = await fetch(`${API_BASE}/sessions/${sessionId}`, {
+      headers: getHeaders(false),
+    });
     
     if (!response.ok) throw new Error('Failed to get session');
     return response.json();
@@ -132,6 +185,7 @@ export const api = {
   async deleteSession(sessionId: string): Promise<void> {
     const response = await fetch(`${API_BASE}/sessions/${sessionId}`, {
       method: 'DELETE',
+      headers: getHeaders(false),
     });
     
     if (!response.ok) throw new Error('Failed to delete session');
@@ -156,16 +210,37 @@ export const api = {
   },
 
   async pollGitHubAuth(deviceCode: string, interval?: number): Promise<void> {
+    console.log(`[API Client] Polling GitHub auth - deviceCode: ${deviceCode.substring(0, 8)}..., interval: ${interval}`);
+    
     const response = await fetch(`${API_BASE}/auth/github/poll`, {
       method: 'POST',
       headers: getHeaders(),
       body: JSON.stringify({ deviceCode, interval }),
     });
     
+    const result = await response.json();
+    console.log('[API Client] Poll response:', {
+      status: response.status,
+      ok: response.ok,
+      result: result
+    });
+    
     if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.error || 'Authentication failed');
+      console.log('[API Client] Response not OK, throwing error');
+      throw new Error(result.error || 'Authentication failed');
     }
+    
+    // Check if the response indicates success
+    if (result.success === false) {
+      console.log(`[API Client] Success is false - pending: ${result.pending}, error: ${result.error}`);
+      // If it's pending, throw a specific error that the polling logic can handle
+      if (result.pending) {
+        throw new Error(result.error || 'authorization_pending');
+      }
+      throw new Error(result.error || 'Authentication failed');
+    }
+    
+    console.log('[API Client] Poll response indicates success!');
   },
 
   async disconnectGitHub(): Promise<void> {
@@ -183,6 +258,40 @@ export const api = {
     });
     
     if (!response.ok) throw new Error('Failed to get GitHub status');
+    const result = await response.json();
+    return result.data;
+  },
+
+  async listGitHubRepos(params?: { page?: number; per_page?: number; sort?: string }): Promise<{
+    repositories: Array<{
+      id: number;
+      name: string;
+      full_name: string;
+      description: string;
+      html_url: string;
+      clone_url: string;
+      ssh_url: string;
+      private: boolean;
+      default_branch: string;
+      updated_at: string;
+      language: string;
+      stargazers_count: number;
+      open_issues_count: number;
+    }>;
+    page: number;
+    per_page: number;
+    total_count: number;
+  }> {
+    const queryParams = new URLSearchParams();
+    if (params?.page) queryParams.append('page', params.page.toString());
+    if (params?.per_page) queryParams.append('per_page', params.per_page.toString());
+    if (params?.sort) queryParams.append('sort', params.sort);
+    
+    const response = await fetch(`${API_BASE}/auth/github/repos?${queryParams}`, {
+      headers: getHeaders(false), // No Content-Type since no body
+    });
+    
+    if (!response.ok) throw new Error('Failed to list GitHub repositories');
     const result = await response.json();
     return result.data;
   },
@@ -307,7 +416,7 @@ export const api = {
   async deploy(environmentId: string, appId: string, branch = 'main'): Promise<any> {
     const response = await fetch(`${API_BASE}/deployment/deploy`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getHeaders(),
       body: JSON.stringify({ environmentId, appId, branch }),
     });
     
@@ -319,7 +428,7 @@ export const api = {
   async createAgent(userId: string, name: string, type: 'claude-code' | 'gemini-cli' | 'qwen-coder', credential?: AgentCredential): Promise<Agent> {
     const response = await fetch(`${API_BASE}/agents`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getHeaders(),
       body: JSON.stringify({ userId, name, type, credential }),
     });
     
@@ -328,14 +437,18 @@ export const api = {
   },
 
   async getUserAgents(userId: string): Promise<{ agents: Agent[] }> {
-    const response = await fetch(`${API_BASE}/agents/user/${userId}`);
+    const response = await fetch(`${API_BASE}/agents/user/${userId}`, {
+      headers: getHeaders(false),
+    });
     
     if (!response.ok) throw new Error('Failed to get agents');
     return response.json();
   },
 
   async getAgent(agentId: string): Promise<Agent> {
-    const response = await fetch(`${API_BASE}/agents/${agentId}`);
+    const response = await fetch(`${API_BASE}/agents/${agentId}`, {
+      headers: getHeaders(false),
+    });
     
     if (!response.ok) throw new Error('Failed to get agent');
     return response.json();
@@ -344,7 +457,7 @@ export const api = {
   async updateAgent(agentId: string, updates: { name?: string, credential?: AgentCredential }): Promise<Agent> {
     const response = await fetch(`${API_BASE}/agents/${agentId}`, {
       method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getHeaders(),
       body: JSON.stringify(updates),
     });
     
@@ -355,6 +468,7 @@ export const api = {
   async deleteAgent(agentId: string): Promise<void> {
     const response = await fetch(`${API_BASE}/agents/${agentId}`, {
       method: 'DELETE',
+      headers: getHeaders(false),
     });
     
     if (!response.ok) throw new Error('Failed to delete agent');
@@ -363,7 +477,9 @@ export const api = {
   // Legacy container methods (for backward compatibility during transition)
   async listContainers(userId?: string): Promise<{ containers: Container[] }> {
     const params = userId ? `?userId=${userId}` : '';
-    const response = await fetch(`${API_BASE}/containers/list${params}`);
+    const response = await fetch(`${API_BASE}/containers/list${params}`, {
+      headers: getHeaders(false),
+    });
     
     if (!response.ok) throw new Error('Failed to list containers');
     return response.json();
@@ -372,6 +488,7 @@ export const api = {
   async deleteContainer(containerId: string): Promise<void> {
     const response = await fetch(`${API_BASE}/containers/${containerId}`, {
       method: 'DELETE',
+      headers: getHeaders(false),
     });
     
     if (!response.ok) throw new Error('Failed to delete container');

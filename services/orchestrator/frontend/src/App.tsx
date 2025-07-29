@@ -9,46 +9,78 @@ import { DashboardNew } from './pages/DashboardNew';
 import { Environment } from './pages/Environment';
 import { Terminal } from './pages/Terminal';
 import { Agents } from './pages/Agents';
+import { GitSettings } from './pages/GitSettings';
+import { Auth } from './pages/Auth';
 import { Toaster } from './components/ui/toaster';
+import { AuthProvider, useAuth } from './contexts/AuthContext';
+import { GitHubProvider } from './contexts/GitHubContext';
 import './App.css';
 
 const queryClient = new QueryClient();
 
-function App() {
+function AuthenticatedApp() {
   const [showCreateDialog, setShowCreateDialog] = useState(false);
 
   return (
-    <QueryClientProvider client={queryClient}>
-      <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
-        <CreateEnvironmentContext.Provider value={{ showCreateDialog, setShowCreateDialog }}>
-          <BrowserRouter>
-            <SidebarProvider>
-              <div className="flex h-screen flex-col">
-                <TopNavigation />
-                <div className="flex flex-1 overflow-hidden">
-                  <AppSidebar />
-                  <main className="flex-1 overflow-auto">
-                    <Routes>
-                      <Route path="/" element={<DashboardNew />} />
-                      <Route path="/agents" element={<Agents />} />
-                      <Route path="/environment/:environmentId" element={<Environment />} />
-                      <Route path="/terminal/:sessionId" element={<Terminal />} />
-                    </Routes>
-                  </main>
-                </div>
-                <div className="border-t bg-background px-4 py-2 text-sm text-muted-foreground">
-                  <div className="flex items-center gap-2">
-                    <div className="flex items-center gap-1">
-                      <span className="h-2 w-2 rounded-full bg-green-500"></span>
-                      <span>Connected</span>
-                    </div>
-                  </div>
+    <GitHubProvider>
+      <CreateEnvironmentContext.Provider value={{ showCreateDialog, setShowCreateDialog }}>
+        <BrowserRouter>
+          <SidebarProvider>
+            <div className="flex h-screen flex-col">
+              <TopNavigation />
+              <div className="flex flex-1 overflow-hidden">
+                <AppSidebar />
+                <main className="flex-1 overflow-auto">
+                  <Routes>
+                    <Route path="/" element={<DashboardNew />} />
+                    <Route path="/agents" element={<Agents />} />
+                    <Route path="/environment/:environmentId" element={<Environment />} />
+                    <Route path="/terminal/:sessionId" element={<Terminal />} />
+                    <Route path="/settings/git" element={<GitSettings />} />
+                  </Routes>
+                </main>
+              </div>
+            <div className="border-t bg-background px-4 py-2 text-sm text-muted-foreground">
+              <div className="flex items-center gap-2">
+                <div className="flex items-center gap-1">
+                  <span className="h-2 w-2 rounded-full bg-green-500"></span>
+                  <span>Connected</span>
                 </div>
               </div>
-            </SidebarProvider>
-            <Toaster />
-          </BrowserRouter>
-        </CreateEnvironmentContext.Provider>
+            </div>
+          </div>
+        </SidebarProvider>
+        <Toaster />
+      </BrowserRouter>
+    </CreateEnvironmentContext.Provider>
+  </GitHubProvider>
+  );
+}
+
+function AppContent() {
+  const { isAuthenticated, isLoading } = useAuth();
+
+  if (isLoading) {
+    return (
+      <div className="flex h-screen items-center justify-center">
+        <div className="text-center">
+          <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent"></div>
+          <p className="mt-2 text-sm text-muted-foreground">Loading...</p>
+        </div>
+      </div>
+    );
+  }
+
+  return isAuthenticated ? <AuthenticatedApp /> : <Auth />;
+}
+
+function App() {
+  return (
+    <QueryClientProvider client={queryClient}>
+      <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
+        <AuthProvider>
+          <AppContent />
+        </AuthProvider>
       </ThemeProvider>
     </QueryClientProvider>
   );

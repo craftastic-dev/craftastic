@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Plus, Terminal, Trash2, ArrowLeft, GitBranch, Folder, Clock, Play, Square, Settings, Bot, Grid3X3, List, User } from 'lucide-react';
+import { Plus, Terminal, Trash2, ArrowLeft, GitBranch, Folder, Clock, Play, Square, Settings, Bot, Grid3X3, List, User, Github, Check, X } from 'lucide-react';
 import { api } from '../api/client';
 import type { Environment as EnvironmentType, Session } from '../api/client';
 import { Button } from '../components/ui/button';
@@ -9,12 +9,14 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../co
 import { Badge } from '../components/ui/badge';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '../components/ui/dropdown-menu';
 import { CreateSessionDialog } from '../components/CreateSessionDialog';
+import { useGitHub } from '../contexts/GitHubContext';
 
 export function Environment() {
   const { environmentId } = useParams<{ environmentId: string }>();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [userId] = useState(() => localStorage.getItem('userId') || `user-${Date.now()}`);
+  const { isConnected: isGitHubConnected, username: githubUsername } = useGitHub();
 
   const { data: environment, isLoading } = useQuery({
     queryKey: ['environment', environmentId],
@@ -190,6 +192,23 @@ export function Environment() {
             <div>
               <label className="text-sm font-medium text-muted-foreground">Branch</label>
               <p className="font-mono text-sm">{environment.branch}</p>
+            </div>
+            <div>
+              <label className="text-sm font-medium text-muted-foreground">GitHub</label>
+              <div className="flex items-center gap-2">
+                <Github className="h-4 w-4" />
+                {isGitHubConnected ? (
+                  <>
+                    <span className="text-sm">{githubUsername}</span>
+                    <Check className="h-3 w-3 text-green-500" />
+                  </>
+                ) : (
+                  <>
+                    <span className="text-sm text-muted-foreground">Not connected</span>
+                    <X className="h-3 w-3 text-muted-foreground" />
+                  </>
+                )}
+              </div>
             </div>
             {environment.repositoryUrl && (
               <div className="md:col-span-2">

@@ -67,19 +67,77 @@ export default async function gitRoutes(fastify: FastifyInstance) {
       const { deviceCode, interval = 5 } = request.body;
       const userId = request.user?.id;
       
+      console.log(`[GitHub Poll] ============ STARTING POLL ATTEMPT ============`);
+      console.log(`[GitHub Poll] User ID: ${userId}`);
+      console.log(`[GitHub Poll] Device Code: ${deviceCode.substring(0, 8)}...`);
+      console.log(`[GitHub Poll] Interval: ${interval}`);
+      
       if (!userId) {
+        console.log('[GitHub Poll] ❌ No user ID found in request');
         return reply.status(401).send({ success: false, error: 'Unauthorized' });
       }
 
       const resolvedUserId = await userService.resolveUserId(userId);
-      const tokenResponse = await gitHubAuthService.pollForToken(deviceCode, interval);
-      await gitHubAuthService.saveUserToken(resolvedUserId, tokenResponse);
+      console.log(`[GitHub Poll] ✅ Resolved user ID: ${resolvedUserId}`);
       
-      return reply.send({
-        success: true,
-        message: 'GitHub authentication completed',
-      });
+      try {
+        console.log('[GitHub Poll] 🔄 Calling gitHubAuthService.pollForToken...');
+        console.log(`[GitHub Poll] GitHub API call starting at: ${new Date().toISOString()}`);
+        
+        const tokenResponse = await gitHubAuthService.pollForToken(deviceCode, interval);
+        
+        console.log('[GitHub Poll] ✅ TOKEN RECEIVED FROM GITHUB!');
+        console.log(`[GitHub Poll] Token response type: ${typeof tokenResponse}`);
+        console.log(`[GitHub Poll] Token response keys: ${Object.keys(tokenResponse)}`);
+        console.log(`[GitHub Poll] Has access_token: ${!!tokenResponse.access_token}`);
+        console.log(`[GitHub Poll] Token type: ${tokenResponse.token_type}`);
+        console.log(`[GitHub Poll] Scope: ${tokenResponse.scope}`);
+        
+        console.log('[GitHub Poll] 💾 Saving token to database...');
+        console.log(`[GitHub Poll] Saving for user ID: ${resolvedUserId}`);
+        
+        await gitHubAuthService.saveUserToken(resolvedUserId, tokenResponse);
+        
+        console.log('[GitHub Poll] ✅ TOKEN SAVED SUCCESSFULLY TO DATABASE!');
+        console.log(`[GitHub Poll] Success response being sent at: ${new Date().toISOString()}`);
+        
+        return reply.send({
+          success: true,
+          message: 'GitHub authentication completed',
+        });
+      } catch (pollError: any) {
+        console.log(`[GitHub Poll] ⚠️  Poll exception caught: ${pollError.message}`);
+        console.log(`[GitHub Poll] Error type: ${typeof pollError}`);
+        console.log(`[GitHub Poll] Error stack: ${pollError.stack}`);
+        
+        // Check if it's an authorization_pending error
+        if (pollError.message === 'authorization_pending') {
+          console.log('[GitHub Poll] 🔄 Authorization still pending, returning pending status');
+          return reply.send({
+            success: false,
+            pending: true,
+            error: 'authorization_pending',
+            message: 'Authorization is still pending',
+          });
+        }
+        
+        if (pollError.message === 'slow_down') {
+          console.log('[GitHub Poll] 🐌 Slow down requested, returning slow down status');
+          return reply.send({
+            success: false,
+            pending: true,
+            error: 'slow_down',
+            message: 'Please slow down polling',
+          });
+        }
+        
+        console.log(`[GitHub Poll] ❌ Unexpected error, re-throwing: ${pollError.message}`);
+        throw pollError;
+      }
     } catch (error) {
+      console.error('[GitHub Poll] ❌ FINAL CATCH ERROR:', error);
+      console.error('[GitHub Poll] Error type:', typeof error);
+      console.error('[GitHub Poll] Error stack:', error.stack);
       return reply.status(400).send({
         success: false,
         error: error.message,
@@ -113,32 +171,51 @@ export default async function gitRoutes(fastify: FastifyInstance) {
   fastify.get('/api/auth/github/status', async (request: FastifyRequest, reply: FastifyReply) => {
     try {
       const userId = request.user?.id;
+      console.log(`[GitHub Status] Raw user ID from request: ${userId}`);
       
       if (!userId) {
+        console.log('[GitHub Status] No user ID found in request');
         return reply.status(401).send({ success: false, error: 'Unauthorized' });
       }
 
       const resolvedUserId = await userService.resolveUserId(userId);
+      console.log(`[GitHub Status] Resolved user ID: ${resolvedUserId}`);
+      
+      // Check what's actually in the database for this user
+      const userRecord = await getDatabase()
+        .selectFrom('users')
+        .select(['id', 'github_username', 'github_access_token', 'github_token_expires_at'])
+        .where('id', '=', resolvedUserId)
+        .executeTakeFirst();
+      
+      console.log(`[GitHub Status] User record from DB:`, {
+        id: userRecord?.id,
+        github_username: userRecord?.github_username,
+        has_token: !!userRecord?.github_access_token,
+        token_expires_at: userRecord?.github_token_expires_at,
+      });
+      
       const hasValidToken = await gitHubAuthService.hasValidToken(resolvedUserId);
+      console.log(`[GitHub Status] hasValidToken result: ${hasValidToken}`);
+      
       let username = null;
 
       if (hasValidToken) {
-        const user = await getDatabase()
-          .selectFrom('users')
-          .select('github_username')
-          .where('id', '=', resolvedUserId)
-          .executeTakeFirst();
-        username = user?.github_username;
+        username = userRecord?.github_username;
       }
 
-      return reply.send({
+      const response = {
         success: true,
         data: {
           connected: hasValidToken,
           username,
         },
-      });
+      };
+      
+      console.log(`[GitHub Status] Returning response:`, response);
+      return reply.send(response);
     } catch (error) {
+      console.error('[GitHub Status] Error:', error);
       return reply.status(500).send({
         success: false,
         error: error.message,
@@ -510,6 +587,78 @@ export default async function gitRoutes(fastify: FastifyInstance) {
       });
     } catch (error) {
       console.error('Git log error:', error);
+      return reply.status(500).send({
+        success: false,
+        error: error.message,
+      });
+    }
+  });
+
+  // GitHub repository listing
+  fastify.get('/api/auth/github/repos', async (request: FastifyRequest<{
+    Querystring: { page?: number; per_page?: number; sort?: string };
+  }>, reply: FastifyReply) => {
+    try {
+      const userId = request.user?.id;
+      
+      if (!userId) {
+        return reply.status(401).send({ success: false, error: 'Unauthorized' });
+      }
+
+      const resolvedUserId = await userService.resolveUserId(userId);
+      const token = await gitHubAuthService.getUserToken(resolvedUserId);
+      
+      if (!token) {
+        return reply.status(400).send({ success: false, error: 'GitHub authentication required' });
+      }
+
+      const { page = 1, per_page = 30, sort = 'updated' } = request.query;
+      
+      // Fetch user repositories from GitHub
+      const response = await fetch(
+        `https://api.github.com/user/repos?page=${page}&per_page=${per_page}&sort=${sort}&direction=desc`,
+        {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Accept': 'application/vnd.github.v3+json',
+          },
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error(`GitHub API error: ${response.statusText}`);
+      }
+
+      const repos = await response.json();
+      
+      // Transform to simpler format
+      const simplifiedRepos = repos.map((repo: any) => ({
+        id: repo.id,
+        name: repo.name,
+        full_name: repo.full_name,
+        description: repo.description,
+        html_url: repo.html_url,
+        clone_url: repo.clone_url,
+        ssh_url: repo.ssh_url,
+        private: repo.private,
+        default_branch: repo.default_branch,
+        updated_at: repo.updated_at,
+        language: repo.language,
+        stargazers_count: repo.stargazers_count,
+        open_issues_count: repo.open_issues_count,
+      }));
+
+      return reply.send({
+        success: true,
+        data: {
+          repositories: simplifiedRepos,
+          page,
+          per_page,
+          total_count: repos.length,
+        },
+      });
+    } catch (error) {
+      console.error('List repositories error:', error);
       return reply.status(500).send({
         success: false,
         error: error.message,

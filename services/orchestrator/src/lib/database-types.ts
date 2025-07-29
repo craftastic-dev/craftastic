@@ -13,12 +13,19 @@ export interface Database {
   session_credentials: SessionCredentialTable;
   agents: AgentTable;
   agent_credentials: AgentCredentialTable;
+  refresh_tokens: RefreshTokenTable;
 }
 
 export interface UserTable {
   id: Generated<string>;
-  email: string;
+  email: string | null;
   name: string;
+  password_hash: string | null;
+  email_verified: boolean;
+  email_verification_token: string | null;
+  password_reset_token: string | null;
+  password_reset_expires: Date | null;
+  last_login_at: Date | null;
   github_access_token: string | null;
   github_refresh_token: string | null;
   github_username: string | null;
@@ -136,4 +143,15 @@ export interface SessionCredentialTable {
   credential_type: string;
   credential_name: string;
   injected_at: Generated<Date>;
+}
+
+export interface RefreshTokenTable {
+  id: Generated<string>;
+  user_id: string;
+  token: string;
+  expires_at: Date;
+  created_at: Generated<Date>;
+  revoked: boolean;
+  user_agent: string | null;
+  ip_address: string | null;
 }

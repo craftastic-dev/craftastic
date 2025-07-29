@@ -12,6 +12,7 @@ import gitRoutes from './routes/git';
 import { deploymentRoutes } from './routes/deployment';
 import { sessionRoutes } from './routes/sessions';
 import agentRoutes from './routes/agents';
+import authRoutes from './routes/auth';
 import { setupDatabase } from './lib/database';
 import { setupViteDev } from './lib/vite-dev';
 
@@ -35,15 +36,46 @@ async function start() {
 
     await server.register(websocket);
 
-    // Development authentication bypass for testing
-    if (config.NODE_ENV === 'development') {
-      server.addHook('preHandler', async (request, reply) => {
-        // Allow test authentication via header in development
-        if (request.headers['x-test-user-id']) {
-          request.user = { id: request.headers['x-test-user-id'] };
+    // Authentication middleware (now using proper JWT)
+    server.addHook('preHandler', async (request, reply) => {
+      // Skip authentication for auth routes, static assets, and frontend routes
+      const publicRoutes = [
+        '/api/auth/register',
+        '/api/auth/login', 
+        '/api/auth/refresh',
+        '/api/auth/verify-email',
+        '/api/auth/request-password-reset',
+        '/api/auth/reset-password'
+      ];
+      
+      // Allow all non-API routes (frontend routes) and assets
+      if (publicRoutes.includes(request.routerPath) || 
+          request.routerPath?.startsWith('/assets/') ||
+          !request.routerPath?.startsWith('/api/')) {
+        return;
+      }
+      
+      try {
+        // Try to verify JWT token
+        await request.jwtVerify();
+        // Add compatibility with old user.id format
+        request.user.id = request.user.sub;
+      } catch (err) {
+        // For now, allow development bypass during transition
+        if (config.NODE_ENV === 'development' && request.headers['x-test-user-id']) {
+          request.user = { 
+            id: request.headers['x-test-user-id'],
+            sub: request.headers['x-test-user-id'],
+            email: `${request.headers['x-test-user-id']}@example.com`,
+            name: `User ${request.headers['x-test-user-id']}`,
+            emailVerified: false
+          };
+          return;
         }
-      });
-    }
+        
+        reply.status(401).send({ success: false, error: 'Unauthorized' });
+      }
+    });
 
     if (config.NODE_ENV === 'production') {
       await server.register(fastifyStatic, {
@@ -54,6 +86,7 @@ async function start() {
       await setupViteDev(server);
     }
 
+    server.register(authRoutes);
     server.register(containerRoutes, { prefix: '/api/containers' });
     server.register(environmentRoutes, { prefix: '/api' });
     server.register(terminalRoutes, { prefix: '/api/terminal' });

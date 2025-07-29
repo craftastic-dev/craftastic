@@ -103,7 +103,7 @@ describe('GitHubAuthService', () => {
 
     it('should warn about missing encryption key in test environment', () => {
       // Remove encryption key to test warning
-      delete process.env.ENCRYPTION_KEY;
+      delete process.env.SERVER_ENCRYPTION_KEY;
       
       // Capture console.warn
       const originalWarn = console.warn;
@@ -114,7 +114,7 @@ describe('GitHubAuthService', () => {
         new GitHubAuthService();
         
         expect(warnCalls.some(call => 
-          call.includes('No ENCRYPTION_KEY set')
+          call.includes('No SERVER_ENCRYPTION_KEY set')
         )).toBe(true);
       } finally {
         console.warn = originalWarn;

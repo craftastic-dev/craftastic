@@ -5,13 +5,11 @@ import { Code, GitBranch, GitFork, Play, Plus, Power, Settings, X, Grid3X3, List
 import { api } from '../api/client';
 import type { Environment } from '../api/client';
 import { useCreateEnvironment } from '../components/AppSidebar';
+import { CreateEnvironmentDialog } from '../components/CreateEnvironmentDialog';
 
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
 
 export function DashboardNew() {
   const navigate = useNavigate();
@@ -56,22 +54,16 @@ export function DashboardNew() {
   });
 
   const { showCreateDialog, setShowCreateDialog } = useCreateEnvironment();
-  const [newEnvironmentName, setNewEnvironmentName] = useState('');
-  const [newEnvironmentRepo, setNewEnvironmentRepo] = useState('');
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('list');
 
-  const handleCreateEnvironment = () => {
-    if (!newEnvironmentName.trim()) return;
-    
-    console.log('Creating environment:', { name: newEnvironmentName.trim(), repositoryUrl: newEnvironmentRepo.trim() || undefined });
+  const handleCreateEnvironment = (name: string, repositoryUrl?: string) => {
+    console.log('Creating environment:', { name, repositoryUrl });
     
     createMutation.mutate({
-      name: newEnvironmentName.trim(),
-      repositoryUrl: newEnvironmentRepo.trim() || undefined,
+      name,
+      repositoryUrl,
     });
     
-    setNewEnvironmentName('');
-    setNewEnvironmentRepo('');
     setShowCreateDialog(false);
   };
 
@@ -188,53 +180,11 @@ export function DashboardNew() {
       </div>
 
       {/* Create Environment Dialog */}
-      <Dialog open={showCreateDialog} onOpenChange={setShowCreateDialog}>
-        <DialogContent className="sm:max-w-[425px]">
-          <DialogHeader>
-            <DialogTitle>Create New Environment</DialogTitle>
-            <DialogDescription>
-              Create a new development environment with optional Git repository.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="grid gap-4 py-4">
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="name" className="text-right">
-                Name
-              </Label>
-              <Input
-                id="name"
-                value={newEnvironmentName}
-                onChange={(e) => setNewEnvironmentName(e.target.value)}
-                placeholder="my-project"
-                className="col-span-3"
-              />
-            </div>
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="repository" className="text-right">
-                Repository
-              </Label>
-              <Input
-                id="repository"
-                value={newEnvironmentRepo}
-                onChange={(e) => setNewEnvironmentRepo(e.target.value)}
-                placeholder="https://github.com/user/repo.git"
-                className="col-span-3"
-              />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setShowCreateDialog(false)}>
-              Cancel
-            </Button>
-            <Button 
-              onClick={handleCreateEnvironment}
-              disabled={!newEnvironmentName.trim() || createMutation.isPending}
-            >
-              {createMutation.isPending ? 'Creating...' : 'Create Environment'}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <CreateEnvironmentDialog
+        open={showCreateDialog}
+        onOpenChange={setShowCreateDialog}
+        onCreate={handleCreateEnvironment}
+      />
     </div>
   )
 }

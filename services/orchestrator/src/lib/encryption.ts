@@ -8,9 +8,9 @@ const KEY_LENGTH = 32;
  * Get the encryption key from environment variable
  */
 function getEncryptionKey(): Buffer {
-  const keyString = process.env.AGENT_CREDENTIALS_ENCRYPTION_KEY;
+  const keyString = process.env.SERVER_ENCRYPTION_KEY;
   if (!keyString) {
-    throw new Error('AGENT_CREDENTIALS_ENCRYPTION_KEY environment variable is required');
+    throw new Error('SERVER_ENCRYPTION_KEY environment variable is required');
   }
   
   // Convert hex string to buffer, or create a hash if it's not hex

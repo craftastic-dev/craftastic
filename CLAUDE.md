@@ -158,6 +158,12 @@ DATABASE_URL=postgresql://user:pass@localhost:5432/craftastic
 
 # Security
 JWT_SECRET=your-jwt-secret
+# Used to encrypt sensitive data in the database (GitHub tokens, agent credentials, etc.)
+# Can be a 32-character string or 64-character hex string
+SERVER_ENCRYPTION_KEY=dev-encryption-key-32-chars-long!
+
+# GitHub OAuth
+GITHUB_CLIENT_ID=Ov23liz42T3AzHtmASDC
 
 # Docker (optional)
 DOCKER_HOST=/var/run/docker.sock

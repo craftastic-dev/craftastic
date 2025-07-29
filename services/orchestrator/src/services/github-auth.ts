@@ -35,11 +35,19 @@ export class GitHubAuthService {
 
   constructor() {
     // Initialize encryption key from environment or generate one
-    const keyString = process.env.ENCRYPTION_KEY || crypto.randomBytes(32).toString('hex');
-    this.encryptionKey = Buffer.from(keyString, 'hex');
+    const keyString = process.env.SERVER_ENCRYPTION_KEY || crypto.randomBytes(32).toString('hex');
     
-    if (!process.env.ENCRYPTION_KEY) {
-      console.warn('⚠️  No ENCRYPTION_KEY set, using random key (tokens will not persist between restarts)');
+    // Handle both hex and plain text keys
+    if (keyString.match(/^[0-9a-fA-F]{64}$/)) {
+      // It's a 64-char hex string
+      this.encryptionKey = Buffer.from(keyString, 'hex');
+    } else {
+      // It's a plain text key, hash it to get consistent 32 bytes
+      this.encryptionKey = crypto.createHash('sha256').update(keyString).digest();
+    }
+    
+    if (!process.env.SERVER_ENCRYPTION_KEY) {
+      console.warn('⚠️  No SERVER_ENCRYPTION_KEY set, using random key (tokens will not persist between restarts)');
     }
   }
 
@@ -82,101 +90,179 @@ export class GitHubAuthService {
   }
 
   /**
-   * Poll for device authorization completion
+   * Poll for device authorization completion (single attempt)
    */
   async pollForToken(deviceCode: string, interval: number = 5): Promise<GitHubTokenResponse> {
-    const maxAttempts = 60; // 5 minutes max
-    let attempts = 0;
+    console.log(`[GitHubAuth] ============ POLLING GITHUB ============`);
+    console.log(`[GitHubAuth] Device Code: ${deviceCode.substring(0, 8)}...${deviceCode.substring(deviceCode.length - 4)}`);
+    console.log(`[GitHubAuth] Client ID: ${GITHUB_DEVICE_CLIENT_ID}`);
+    console.log(`[GitHubAuth] Interval: ${interval}s`);
+    console.log(`[GitHubAuth] Current time: ${new Date().toISOString()}`);
+    
+    try {
+      console.log('[GitHubAuth] 📡 Making request to GitHub OAuth API...');
+      
+      const requestBody = {
+        client_id: GITHUB_DEVICE_CLIENT_ID,
+        device_code: deviceCode,
+        grant_type: 'urn:ietf:params:oauth:grant-type:device_code',
+      };
+      
+      console.log('[GitHubAuth] Request body:', requestBody);
+      
+      const response = await fetch('https://github.com/login/oauth/access_token', {
+        method: 'POST',
+        headers: {
+          'Accept': 'application/json',
+          'Content-Type': 'application/json',
+          'User-Agent': 'Craftastic-Orchestrator/1.0.0',
+        },
+        body: JSON.stringify(requestBody),
+      });
 
-    while (attempts < maxAttempts) {
-      try {
-        const response = await fetch('https://github.com/login/oauth/access_token', {
-          method: 'POST',
-          headers: {
-            'Accept': 'application/json',
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            client_id: GITHUB_DEVICE_CLIENT_ID,
-            device_code: deviceCode,
-            grant_type: 'urn:ietf:params:oauth:grant-type:device_code',
-          }),
-        });
+      console.log(`[GitHubAuth] 📥 GitHub API response received:`);
+      console.log(`[GitHubAuth] Status: ${response.status} ${response.statusText}`);
+      console.log(`[GitHubAuth] Headers:`, Object.fromEntries(response.headers.entries()));
 
-        if (!response.ok) {
-          let errorDetails = response.statusText;
-          try {
-            const errorBody = await response.json();
-            errorDetails = errorBody.error_description || errorBody.error || response.statusText;
-          } catch {
-            // If we can't parse the error body, use the status text
-          }
-          throw new Error(`GitHub token polling failed: ${errorDetails}`);
-        }
-
-        let data;
+      if (!response.ok) {
+        let errorDetails = response.statusText;
         try {
-          data = await response.json();
+          const errorBody = await response.json();
+          console.log(`[GitHubAuth] Error response body:`, errorBody);
+          errorDetails = errorBody.error_description || errorBody.error || response.statusText;
         } catch (parseError) {
-          console.error('❌ Failed to parse GitHub response as JSON:', parseError);
-          // Can't read response text after trying JSON - log the parse error instead
-          console.error('Parse error details:', parseError.message);
-          throw new Error('GitHub returned invalid JSON response');
+          console.error('[GitHubAuth] Failed to parse error response as JSON:', parseError);
         }
-
-        if (data.access_token) {
-          console.log('✅ GitHub device authorization completed');
-          return data;
-        }
-
-        if (data.error === 'authorization_pending') {
-          // Continue polling
-          await this.sleep(interval * 1000);
-          attempts++;
-          continue;
-        }
-
-        if (data.error === 'slow_down') {
-          // Increase interval and continue
-          interval += 5;
-          await this.sleep(interval * 1000);
-          attempts++;
-          continue;
-        }
-
-        // Other errors (expired_token, unsupported_grant_type, etc.)
-        throw new Error(data.error_description || data.error);
-
-      } catch (error) {
-        console.error('❌ Error polling for GitHub token:', error);
-        throw new Error(`Token polling failed: ${error.message}`);
+        console.error(`[GitHubAuth] ❌ GitHub API HTTP error: ${errorDetails}`);
+        throw new Error(`GitHub token polling failed: ${errorDetails}`);
       }
-    }
 
-    throw new Error('Device authorization timeout - user did not complete the flow');
+      let data;
+      try {
+        const responseText = await response.text();
+        console.log(`[GitHubAuth] Raw response text: ${responseText}`);
+        data = JSON.parse(responseText);
+        console.log('[GitHubAuth] ✅ Parsed GitHub API response:');
+        console.log('[GitHubAuth] Response data:', JSON.stringify(data, null, 2));
+      } catch (parseError) {
+        console.error('❌ Failed to parse GitHub response as JSON:', parseError);
+        throw new Error('GitHub returned invalid JSON response');
+      }
+
+      // Check for successful authentication
+      if (data.access_token) {
+        console.log('[GitHubAuth] 🎉 SUCCESS! GitHub device authorization completed!');
+        console.log(`[GitHubAuth] Token type: ${data.token_type}`);
+        console.log(`[GitHubAuth] Scope: ${data.scope}`);
+        console.log(`[GitHubAuth] Access token length: ${data.access_token.length}`);
+        console.log(`[GitHubAuth] Has refresh token: ${!!data.refresh_token}`);
+        console.log(`[GitHubAuth] Expires in: ${data.expires_in || 'No expiration'}`);
+        return data;
+      }
+
+      // Handle pending/error states
+      console.log(`[GitHubAuth] No access token in response. Checking error status...`);
+      
+      if (data.error === 'authorization_pending') {
+        console.log('[GitHubAuth] 🔄 Authorization still pending - user has not completed authorization yet');
+        throw new Error('authorization_pending');
+      }
+
+      if (data.error === 'slow_down') {
+        console.log('[GitHubAuth] 🐌 GitHub rate limiting - slow down requested');
+        throw new Error('slow_down');
+      }
+      
+      if (data.error === 'expired_token') {
+        console.log('[GitHubAuth] ⏰ Device code expired - user took too long to authorize');
+        throw new Error('expired_token');
+      }
+      
+      if (data.error === 'unsupported_grant_type') {
+        console.log('[GitHubAuth] ❌ Unsupported grant type - configuration error');
+        throw new Error('unsupported_grant_type');
+      }
+      
+      if (data.error === 'incorrect_client_credentials') {
+        console.log('[GitHubAuth] ❌ Incorrect client credentials - OAuth app configuration error');
+        throw new Error('incorrect_client_credentials');
+      }
+      
+      if (data.error === 'incorrect_device_code') {
+        console.log('[GitHubAuth] ❌ Incorrect device code - device code is invalid');
+        throw new Error('incorrect_device_code');
+      }
+      
+      if (data.error === 'access_denied') {
+        console.log('[GitHubAuth] ❌ Access denied - user rejected the authorization');
+        throw new Error('access_denied');
+      }
+
+      // Other/unknown errors
+      console.error(`[GitHubAuth] ❌ Unknown/unexpected error from GitHub:`, data);
+      throw new Error(data.error_description || data.error || 'Unknown GitHub API error');
+
+    } catch (error) {
+      console.error('[GitHubAuth] ❌ Exception in pollForToken:', error);
+      console.error('[GitHubAuth] Error type:', typeof error);
+      console.error('[GitHubAuth] Error message:', error.message);
+      if (error.stack) {
+        console.error('[GitHubAuth] Error stack:', error.stack);
+      }
+      throw error;
+    }
   }
 
   /**
    * Save encrypted GitHub token for user
    */
   async saveUserToken(userId: string, tokenResponse: GitHubTokenResponse): Promise<void> {
+    console.log(`[GitHubAuth] ============ SAVING TOKEN ============`);
+    console.log(`[GitHubAuth] User ID: ${userId}`);
+    console.log(`[GitHubAuth] Token response received:`, {
+      has_access_token: !!tokenResponse.access_token,
+      token_type: tokenResponse.token_type,
+      scope: tokenResponse.scope,
+      expires_in: tokenResponse.expires_in,
+      has_refresh_token: !!tokenResponse.refresh_token,
+      access_token_length: tokenResponse.access_token?.length
+    });
+    
     try {
       // Get user info from GitHub to validate token and get username
+      console.log('[GitHubAuth] 👤 Fetching GitHub user info to validate token...');
       const userInfo = await this.getGitHubUser(tokenResponse.access_token);
+      console.log(`[GitHubAuth] ✅ GitHub user info received:`, {
+        id: userInfo.id,
+        login: userInfo.login,
+        name: userInfo.name,
+        email: userInfo.email
+      });
       
       // Encrypt the token
+      console.log('[GitHubAuth] 🔒 Encrypting tokens...');
       const encryptedToken = this.encryptString(tokenResponse.access_token);
       const encryptedRefreshToken = tokenResponse.refresh_token 
         ? this.encryptString(tokenResponse.refresh_token)
         : null;
+
+      console.log(`[GitHubAuth] ✅ Tokens encrypted successfully`);
+      console.log(`[GitHubAuth] Encrypted token length: ${encryptedToken.length}`);
+      console.log(`[GitHubAuth] Has encrypted refresh token: ${!!encryptedRefreshToken}`);
 
       // Calculate expiration if provided
       const expiresAt = tokenResponse.expires_in 
         ? new Date(Date.now() + tokenResponse.expires_in * 1000)
         : null;
 
+      console.log(`[GitHubAuth] Token expiration: ${expiresAt ? expiresAt.toISOString() : 'No expiration'}`);
+
+      console.log('[GitHubAuth] 💾 Updating database...');
+      console.log(`[GitHubAuth] Updating user: ${userId}`);
+      console.log(`[GitHubAuth] Setting github_username: ${userInfo.login}`);
+      
       // Save to database
-      await getDatabase()
+      const result = await getDatabase()
         .updateTable('users')
         .set({
           github_access_token: encryptedToken,
@@ -188,9 +274,35 @@ export class GitHubAuthService {
         .where('id', '=', userId)
         .execute();
 
-      console.log(`✅ Saved GitHub token for user ${userId} (${userInfo.login})`);
+      console.log(`[GitHubAuth] ✅ Database update completed!`);
+      console.log(`[GitHubAuth] Update result:`, result);
+      console.log(`[GitHubAuth] Rows affected: ${result.length}`);
+      
+      if (result.length === 0) {
+        console.error(`[GitHubAuth] ❌ NO ROWS UPDATED! User ${userId} may not exist in database.`);
+        throw new Error(`User ${userId} not found in database`);
+      }
+      
+      console.log(`[GitHubAuth] ✅ SUCCESS! Token saved for user ${userId} (GitHub: @${userInfo.login})`);
+      
+      // Verify the save by reading back
+      console.log('[GitHubAuth] 🔍 Verifying save by reading back from database...');
+      const verification = await getDatabase()
+        .selectFrom('users')
+        .select(['github_username', 'github_access_token', 'github_token_expires_at'])
+        .where('id', '=', userId)
+        .executeTakeFirst();
+        
+      console.log(`[GitHubAuth] Verification result:`, {
+        github_username: verification?.github_username,
+        has_encrypted_token: !!verification?.github_access_token,
+        expires_at: verification?.github_token_expires_at
+      });
+      
     } catch (error) {
-      console.error('❌ Failed to save GitHub token:', error);
+      console.error('[GitHubAuth] ❌ FAILED TO SAVE TOKEN:', error);
+      console.error('[GitHubAuth] Error type:', typeof error);
+      console.error('[GitHubAuth] Error stack:', error.stack);
       throw new Error(`Token save failed: ${error.message}`);
     }
   }
@@ -200,13 +312,22 @@ export class GitHubAuthService {
    */
   async getUserToken(userId: string): Promise<string | null> {
     try {
+      console.log(`[GitHubAuth] getUserToken called for user: ${userId}`);
+      
       const user = await getDatabase()
         .selectFrom('users')
         .select(['github_access_token', 'github_token_expires_at'])
         .where('id', '=', userId)
         .executeTakeFirst();
 
+      console.log(`[GitHubAuth] Database query result:`, {
+        user_found: !!user,
+        has_token: !!user?.github_access_token,
+        expires_at: user?.github_token_expires_at,
+      });
+
       if (!user?.github_access_token) {
+        console.log('[GitHubAuth] No access token found in database');
         return null;
       }
 
@@ -216,8 +337,12 @@ export class GitHubAuthService {
         return null;
       }
 
+      console.log('[GitHubAuth] Decrypting token...');
       // Decrypt and return token
-      return this.decryptString(user.github_access_token);
+      const decryptedToken = this.decryptString(user.github_access_token);
+      console.log(`[GitHubAuth] Token decrypted successfully: ${decryptedToken ? 'yes' : 'no'}`);
+      
+      return decryptedToken;
     } catch (error) {
       console.error('❌ Failed to get GitHub token:', error);
       return null;
@@ -318,10 +443,15 @@ export class GitHubAuthService {
    * Check if user has valid GitHub token
    */
   async hasValidToken(userId: string): Promise<boolean> {
+    console.log(`[GitHubAuth] hasValidToken called for user: ${userId}`);
+    
     const token = await this.getUserToken(userId);
+    console.log(`[GitHubAuth] getUserToken returned: ${token ? 'token found' : 'no token'}`);
+    
     if (!token) return false;
 
     try {
+      console.log('[GitHubAuth] Validating token with GitHub API...');
       // Validate token by making a simple API call
       const response = await fetch(`${GITHUB_API_BASE}/user`, {
         headers: {
@@ -330,8 +460,10 @@ export class GitHubAuthService {
         },
       });
 
+      console.log(`[GitHubAuth] GitHub API validation response: ${response.status} ${response.statusText}`);
       return response.ok;
-    } catch {
+    } catch (error) {
+      console.error('[GitHubAuth] Error validating token:', error);
       return false;
     }
   }

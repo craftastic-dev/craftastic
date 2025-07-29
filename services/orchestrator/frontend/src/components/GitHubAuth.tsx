@@ -1,7 +1,6 @@
-import { useState, useEffect } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useEffect } from 'react';
 import { Github, ExternalLink, Loader2, CheckCircle, AlertCircle, X } from 'lucide-react';
-import { api } from '../api/client';
+import { useGitHub } from '../contexts/GitHubContext';
 import { Button } from './ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Alert, AlertDescription } from './ui/alert';
@@ -12,98 +11,21 @@ interface GitHubAuthProps {
 }
 
 export function GitHubAuth({ onAuthChange }: GitHubAuthProps) {
-  const [deviceCode, setDeviceCode] = useState<string | null>(null);
-  const [userCode, setUserCode] = useState<string | null>(null);
-  const [verificationUri, setVerificationUri] = useState<string | null>(null);
-  const [polling, setPolling] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const queryClient = useQueryClient();
-
-  const { data: githubStatus, refetch: refetchStatus } = useQuery({
-    queryKey: ['github-status'],
-    queryFn: () => api.getGitHubStatus(),
-    retry: false,
-  });
-
-  const initiateMutation = useMutation({
-    mutationFn: () => api.initiateGitHubAuth(),
-    onSuccess: (data) => {
-      setDeviceCode(data.device_code);
-      setUserCode(data.user_code);
-      setVerificationUri(data.verification_uri);
-      setError(null);
-      
-      // Start polling
-      setPolling(true);
-      pollForAuth(data.device_code, data.interval);
-    },
-    onError: (error) => {
-      setError(error.message);
-    },
-  });
-
-  const disconnectMutation = useMutation({
-    mutationFn: () => api.disconnectGitHub(),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['github-status'] });
-      setDeviceCode(null);
-      setUserCode(null);
-      setVerificationUri(null);
-      setPolling(false);
-      setError(null);
-      onAuthChange?.(false);
-    },
-    onError: (error) => {
-      setError(error.message);
-    },
-  });
-
-  const pollForAuth = async (deviceCode: string, interval: number) => {
-    let attempts = 0;
-    const maxAttempts = 60; // 5 minutes max
-
-    const poll = async () => {
-      if (attempts >= maxAttempts) {
-        setPolling(false);
-        setError('Authentication timeout. Please try again.');
-        return;
-      }
-
-      try {
-        await api.pollGitHubAuth(deviceCode, interval);
-        
-        // Authentication successful
-        setPolling(false);
-        setDeviceCode(null);
-        setUserCode(null);
-        setVerificationUri(null);
-        setError(null);
-        
-        // Refresh status
-        await refetchStatus();
-        onAuthChange?.(true);
-        
-      } catch (error) {
-        if (error.message.includes('authorization_pending') || error.message.includes('slow_down')) {
-          // Continue polling
-          attempts++;
-          setTimeout(poll, interval * 1000);
-        } else {
-          setPolling(false);
-          setError(error.message);
-        }
-      }
-    };
-
-    setTimeout(poll, interval * 1000);
-  };
+  const {
+    isConnected,
+    username,
+    isLoading,
+    connect,
+    disconnect,
+    deviceCode,
+    verificationUri,
+    userCode,
+    deviceCodeExpired
+  } = useGitHub();
 
   const handleCancelAuth = () => {
-    setPolling(false);
-    setDeviceCode(null);
-    setUserCode(null);
-    setVerificationUri(null);
-    setError(null);
+    // Context will handle cleanup when deviceCode is cleared
+    // For now, we could add a cancel method to the context if needed
   };
 
   const openGitHub = () => {
@@ -113,12 +35,10 @@ export function GitHubAuth({ onAuthChange }: GitHubAuthProps) {
   };
 
   useEffect(() => {
-    if (githubStatus) {
-      onAuthChange?.(githubStatus.connected, githubStatus.username);
-    }
-  }, [githubStatus, onAuthChange]);
+    onAuthChange?.(isConnected, username);
+  }, [isConnected, username, onAuthChange]);
 
-  if (githubStatus?.connected) {
+  if (isConnected) {
     return (
       <Card>
         <CardHeader>
@@ -132,16 +52,16 @@ export function GitHubAuth({ onAuthChange }: GitHubAuthProps) {
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <Badge variant="secondary">
-                @{githubStatus.username}
+                @{username}
               </Badge>
             </div>
             <Button
               variant="outline"
               size="sm"
-              onClick={() => disconnectMutation.mutate()}
-              disabled={disconnectMutation.isPending}
+              onClick={disconnect}
+              disabled={isLoading}
             >
-              {disconnectMutation.isPending ? (
+              {isLoading ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
               ) : (
                 'Disconnect'
@@ -165,20 +85,20 @@ export function GitHubAuth({ onAuthChange }: GitHubAuthProps) {
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        {error && (
+        {deviceCodeExpired && (
           <Alert variant="destructive">
             <AlertCircle className="h-4 w-4" />
-            <AlertDescription>{error}</AlertDescription>
+            <AlertDescription>Device code has expired. Please try again.</AlertDescription>
           </Alert>
         )}
 
-        {!polling && !userCode && (
+        {!deviceCode && !userCode && (
           <Button
-            onClick={() => initiateMutation.mutate()}
-            disabled={initiateMutation.isPending}
+            onClick={connect}
+            disabled={isLoading}
             className="w-full"
           >
-            {initiateMutation.isPending ? (
+            {isLoading ? (
               <>
                 <Loader2 className="h-4 w-4 mr-2 animate-spin" />
                 Initiating...
@@ -224,7 +144,7 @@ export function GitHubAuth({ onAuthChange }: GitHubAuthProps) {
               </Button>
             </div>
 
-            {polling && (
+            {deviceCode && (
               <div className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
                 <Loader2 className="h-4 w-4 animate-spin" />
                 Waiting for authorization...
