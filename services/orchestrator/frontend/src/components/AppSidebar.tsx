@@ -3,6 +3,7 @@ import { Folder, Settings, Container, Bot, GitBranch, ChevronRight, ChevronDown,
 import { useState, createContext, useContext, useEffect } from "react"
 import { useQuery } from '@tanstack/react-query'
 import { api } from '../api/client'
+import { useAuth } from '../contexts/AuthContext'
 
 import { Sidebar, SidebarContent, SidebarFooter, SidebarGroup, SidebarGroupContent, SidebarGroupLabel, SidebarMenu, SidebarMenuButton, SidebarMenuItem } from "@/components/ui/sidebar"
 
@@ -20,25 +21,19 @@ export const useCreateEnvironment = () => useContext(CreateEnvironmentContext);
 export function AppSidebar() {
   const { setShowCreateDialog } = useCreateEnvironment();
   const [expandedEnvs, setExpandedEnvs] = useState<Set<string>>(new Set());
-
-  const [userId] = useState(() => {
-    const stored = localStorage.getItem('userId');
-    if (!stored) {
-      const newUserId = `user-${Date.now()}`;
-      localStorage.setItem('userId', newUserId);
-      return newUserId;
-    }
-    return stored;
-  });
+  const { user } = useAuth();
+  const userId = user?.id;
 
   const { data: environmentsData } = useQuery({
     queryKey: ['environments', userId],
-    queryFn: () => api.getUserEnvironments(userId),
+    queryFn: () => userId ? api.getUserEnvironments(userId) : Promise.resolve({ environments: [] }),
+    enabled: !!userId,
   });
 
   const { data: agentsData } = useQuery({
     queryKey: ['agents', userId],
-    queryFn: () => api.getUserAgents(userId),
+    queryFn: () => userId ? api.getUserAgents(userId) : Promise.resolve({ agents: [] }),
+    enabled: !!userId,
   });
 
   const environments = environmentsData?.environments || [];

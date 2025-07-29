@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate, useParams } from 'react-router-dom';
-import { RefreshCw, Circle, Plus } from 'lucide-react';
+import { RefreshCw, Circle, Plus, GitBranch } from 'lucide-react';
 import { api } from '../api/client';
 import type { Session } from '../api/client';
 import { Button } from './ui/button';
@@ -89,6 +89,12 @@ export function SessionList({ environmentId }: SessionListProps) {
                     </div>
                     <div className="text-xs text-muted-foreground space-y-0.5">
                       <div>{formatDate(session.createdAt)}</div>
+                      {session.gitBranch && (
+                        <div className="flex items-center gap-1">
+                          <GitBranch className="h-3 w-3" />
+                          <span>{session.gitBranch}</span>
+                        </div>
+                      )}
                       <div className="truncate">{session.workingDirectory}</div>
                     </div>
                   </div>

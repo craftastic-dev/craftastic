@@ -26,14 +26,28 @@ export class WorktreeService {
     const { environmentId, sessionId, repositoryUrl, branch = 'main' } = config;
     
     const repoPath = path.join(this.dataDir, 'repos', environmentId);
-    const worktreePath = path.join(repoPath, 'worktrees', sessionId);
+    // Use branch name for worktree path instead of session ID
+    const worktreePath = path.join(repoPath, 'worktrees', branch);
 
     try {
       // Ensure the repo exists (clone if first time)
       await this.ensureBareRepository(environmentId, repositoryUrl);
 
-      // Create the worktree
-      await this.createGitWorktree(repoPath, worktreePath, branch);
+      // Check if worktree already exists for this branch
+      const existingWorktree = await this.findWorktreeForBranch(repoPath, branch);
+      if (existingWorktree) {
+        if (existingWorktree.path === worktreePath) {
+          console.log(`✅ Reusing existing worktree for branch ${branch} at ${worktreePath}`);
+        } else {
+          // Branch is checked out elsewhere (likely legacy session-based path)
+          console.log(`⚠️  Branch ${branch} is already checked out at ${existingWorktree.path}`);
+          throw new Error(`Branch '${branch}' is already in use by another session. Only one session can use a branch at a time.`);
+        }
+      } else {
+        // Create the worktree only if it doesn't exist
+        await this.createGitWorktree(repoPath, worktreePath, branch);
+        console.log(`✅ Created new worktree for branch ${branch} at ${worktreePath}`);
+      }
 
       // Update session with worktree info
       await getDatabase()
@@ -57,7 +71,6 @@ export class WorktreeService {
         .where('git_clone_path', 'is', null)
         .execute();
 
-      console.log(`✅ Created worktree for session ${sessionId} at ${worktreePath}`);
       return worktreePath;
 
     } catch (error) {
@@ -71,14 +84,38 @@ export class WorktreeService {
    */
   async removeWorktree(environmentId: string, sessionId: string): Promise<void> {
     const repoPath = path.join(this.dataDir, 'repos', environmentId);
-    const worktreePath = path.join(repoPath, 'worktrees', sessionId);
 
     try {
-      // Check if worktree exists
-      if (await this.worktreeExists(repoPath, sessionId)) {
-        // Remove the worktree
-        await execPromise(`git -C "${repoPath}" worktree remove --force "worktrees/${sessionId}"`);
-        console.log(`✅ Removed worktree for session ${sessionId}`);
+      // Get the session to find its branch
+      const session = await getDatabase()
+        .selectFrom('sessions')
+        .select(['git_branch', 'worktree_path'])
+        .where('id', '=', sessionId)
+        .executeTakeFirst();
+
+      if (session?.git_branch) {
+        const worktreePath = path.join(repoPath, 'worktrees', session.git_branch);
+        
+        // Check if worktree exists for this branch
+        if (await this.worktreeExists(repoPath, session.git_branch)) {
+          // Only remove if no other sessions are using this branch
+          const otherSessions = await getDatabase()
+            .selectFrom('sessions')
+            .select('id')
+            .where('environment_id', '=', environmentId)
+            .where('git_branch', '=', session.git_branch)
+            .where('id', '!=', sessionId)
+            .where('status', '!=', 'dead')
+            .executeTakeFirst();
+
+          if (!otherSessions) {
+            // Remove the worktree since no other sessions use this branch
+            await execPromise(`git -C "${repoPath}" worktree remove --force "worktrees/${session.git_branch}"`);
+            console.log(`✅ Removed worktree for branch ${session.git_branch} (session ${sessionId})`);
+          } else {
+            console.log(`⚠️  Keeping worktree for branch ${session.git_branch} as other sessions still use it`);
+          }
+        }
       }
 
       // Clean up session worktree info
@@ -101,7 +138,7 @@ export class WorktreeService {
   /**
    * List all worktrees for an environment
    */
-  async listWorktrees(environmentId: string): Promise<Array<{ sessionId: string; branch: string; path: string }>> {
+  async listWorktrees(environmentId: string): Promise<Array<{ branch: string; path: string; sessions: string[] }>> {
     const repoPath = path.join(this.dataDir, 'repos', environmentId);
 
     try {
@@ -110,7 +147,7 @@ export class WorktreeService {
       }
 
       const { stdout } = await execPromise(`git -C "${repoPath}" worktree list --porcelain`);
-      const worktrees: Array<{ sessionId: string; branch: string; path: string }> = [];
+      const worktrees: Array<{ branch: string; path: string; sessions: string[] }> = [];
       
       const lines = stdout.split('\n');
       let currentWorktree: { path?: string; branch?: string } = {};
@@ -124,12 +161,21 @@ export class WorktreeService {
           currentWorktree.branch = branch;
         } else if (line === '' && currentWorktree.path) {
           // End of worktree info
-          const sessionId = path.basename(currentWorktree.path);
-          if (sessionId !== environmentId && currentWorktree.path.includes('/worktrees/')) {
+          const pathBasename = path.basename(currentWorktree.path);
+          if (pathBasename !== environmentId && currentWorktree.path.includes('/worktrees/')) {
+            // Find sessions using this branch
+            const sessions = await getDatabase()
+              .selectFrom('sessions')
+              .select('id')
+              .where('environment_id', '=', environmentId)
+              .where('git_branch', '=', currentWorktree.branch || pathBasename)
+              .where('status', '!=', 'dead')
+              .execute();
+
             worktrees.push({
-              sessionId,
-              branch: currentWorktree.branch || 'unknown',
+              branch: currentWorktree.branch || pathBasename,
               path: currentWorktree.path,
+              sessions: sessions.map(s => s.id),
             });
           }
           currentWorktree = {};
@@ -149,22 +195,18 @@ export class WorktreeService {
   async cleanupOrphanedWorktrees(environmentId: string): Promise<void> {
     try {
       const worktrees = await this.listWorktrees(environmentId);
+      const repoPath = path.join(this.dataDir, 'repos', environmentId);
       
-      // Get active sessions for this environment
-      const activeSessions = await getDatabase()
-        .selectFrom('sessions')
-        .select('id')
-        .where('environment_id', '=', environmentId)
-        .where('status', '!=', 'dead')
-        .execute();
-
-      const activeSessionIds = new Set(activeSessions.map(s => s.id));
-
-      // Remove worktrees for inactive sessions
+      // Remove worktrees that have no active sessions
       for (const worktree of worktrees) {
-        if (!activeSessionIds.has(worktree.sessionId)) {
-          console.log(`🧹 Cleaning up orphaned worktree for session ${worktree.sessionId}`);
-          await this.removeWorktree(environmentId, worktree.sessionId);
+        if (worktree.sessions.length === 0) {
+          console.log(`🧹 Cleaning up orphaned worktree for branch ${worktree.branch}`);
+          try {
+            await execPromise(`git -C "${repoPath}" worktree remove --force "worktrees/${worktree.branch}"`);
+            console.log(`✅ Removed orphaned worktree for branch ${worktree.branch}`);
+          } catch (error) {
+            console.error(`❌ Failed to remove orphaned worktree for branch ${worktree.branch}:`, error);
+          }
         }
       }
     } catch (error) {
@@ -295,12 +337,38 @@ export class WorktreeService {
     }
   }
 
-  private async worktreeExists(repoPath: string, sessionId: string): Promise<boolean> {
+  private async worktreeExists(repoPath: string, branchOrSessionId: string): Promise<boolean> {
     try {
       const { stdout } = await execPromise(`git -C "${repoPath}" worktree list --porcelain`);
-      return stdout.includes(`worktrees/${sessionId}`);
+      return stdout.includes(`worktrees/${branchOrSessionId}`);
     } catch {
       return false;
+    }
+  }
+
+  private async findWorktreeForBranch(repoPath: string, branch: string): Promise<{ path: string; branch: string } | null> {
+    try {
+      const { stdout } = await execPromise(`git -C "${repoPath}" worktree list --porcelain`);
+      const lines = stdout.split('\n');
+      let currentWorktree: { path?: string; branch?: string } = {};
+
+      for (const line of lines) {
+        if (line.startsWith('worktree ')) {
+          currentWorktree.path = line.substring(9);
+        } else if (line.startsWith('branch ')) {
+          currentWorktree.branch = line.substring(7);
+        } else if (line === '' && currentWorktree.path && currentWorktree.branch === `refs/heads/${branch}`) {
+          return {
+            path: currentWorktree.path,
+            branch: branch
+          };
+        } else if (line === '') {
+          currentWorktree = {};
+        }
+      }
+      return null;
+    } catch {
+      return null;
     }
   }
 }

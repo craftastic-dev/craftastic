@@ -6,6 +6,7 @@ import { api } from '../api/client';
 import type { Environment } from '../api/client';
 import { useCreateEnvironment } from '../components/AppSidebar';
 import { CreateEnvironmentDialog } from '../components/CreateEnvironmentDialog';
+import { useAuth } from '../contexts/AuthContext';
 
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
@@ -14,24 +15,20 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 export function DashboardNew() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const [userId] = useState(() => {
-    const stored = localStorage.getItem('userId');
-    if (!stored) {
-      const newUserId = `user-${Date.now()}`;
-      localStorage.setItem('userId', newUserId);
-      return newUserId;
-    }
-    return stored;
-  });
+  const { user } = useAuth();
+  const userId = user?.id;
 
   const { data, isLoading, refetch } = useQuery({
     queryKey: ['environments', userId],
-    queryFn: () => api.getUserEnvironments(userId),
+    queryFn: () => userId ? api.getUserEnvironments(userId) : Promise.resolve({ environments: [] }),
+    enabled: !!userId,
   });
 
   const createMutation = useMutation({
-    mutationFn: ({ name, repositoryUrl }: { name: string; repositoryUrl?: string }) => 
-      api.createEnvironment(userId, name, repositoryUrl),
+    mutationFn: ({ name, repositoryUrl }: { name: string; repositoryUrl?: string }) => {
+      if (!userId) throw new Error('User not authenticated');
+      return api.createEnvironment(userId, name, repositoryUrl);
+    },
     onSuccess: (environment) => {
       console.log('Environment created successfully:', environment);
       // Invalidate all environment queries for this user

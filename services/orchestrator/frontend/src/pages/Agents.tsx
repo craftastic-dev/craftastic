@@ -1,17 +1,14 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { AgentList } from '../components/AgentList';
+import { useAuth } from '../contexts/AuthContext';
 
 export function Agents() {
-  // Get userId from localStorage (same pattern as AppSidebar)
-  const [userId] = useState(() => {
-    const stored = localStorage.getItem('userId');
-    if (!stored) {
-      const newUserId = `user-${Date.now()}`;
-      localStorage.setItem('userId', newUserId);
-      return newUserId;
-    }
-    return stored;
-  });
+  const { user } = useAuth();
+  const userId = user?.id;
+
+  if (!userId) {
+    return <div>Please log in to view agents.</div>;
+  }
 
   return <AgentList userId={userId} />;
 }

@@ -15,6 +15,7 @@ import agentRoutes from './routes/agents';
 import authRoutes from './routes/auth';
 import { setupDatabase } from './lib/database';
 import { setupViteDev } from './lib/vite-dev';
+import { cleanupStaleSessions } from './services/session-cleanup';
 
 const server = Fastify({
   logger: {
@@ -101,6 +102,18 @@ async function start() {
     });
 
     server.log.info(`Server listening on ${config.PORT}`);
+    
+    // Run session cleanup on startup
+    cleanupStaleSessions().catch(err => {
+      server.log.error('Error during initial session cleanup:', err);
+    });
+    
+    // Run session cleanup periodically (every 5 minutes)
+    setInterval(() => {
+      cleanupStaleSessions().catch(err => {
+        server.log.error('Error during periodic session cleanup:', err);
+      });
+    }, 5 * 60 * 1000);
   } catch (err) {
     server.log.error(err);
     process.exit(1);

@@ -15,14 +15,6 @@ const getHeaders = (includeContentType: boolean = true, additionalHeaders: Recor
   
   if (accessToken) {
     headers['Authorization'] = `Bearer ${accessToken}`;
-  } else if (import.meta.env.DEV) {
-    // Fallback to dev user ID during transition
-    let userId = localStorage.getItem('userId');
-    if (!userId) {
-      userId = `user-${Date.now()}`;
-      localStorage.setItem('userId', userId);
-    }
-    headers['x-test-user-id'] = userId;
   }
   
   return headers;
@@ -88,6 +80,7 @@ export interface Session {
   lastActivity?: string;
   agentId?: string;
   sessionType: 'terminal' | 'agent';
+  gitBranch?: string;
 }
 
 export interface Agent {
@@ -160,7 +153,13 @@ export const api = {
       body: JSON.stringify({ environmentId, name, workingDirectory, sessionType, agentId }),
     });
     
-    if (!response.ok) throw new Error('Failed to create session');
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({ error: 'Failed to create session' }));
+      const error = new Error(errorData.message || errorData.error || 'Failed to create session');
+      (error as any).code = errorData.error;
+      (error as any).existingSession = errorData.existingSession;
+      throw error;
+    }
     return response.json();
   },
 
@@ -189,6 +188,23 @@ export const api = {
     });
     
     if (!response.ok) throw new Error('Failed to delete session');
+  },
+
+  async checkBranchAvailability(environmentId: string, branch: string): Promise<{ 
+    available: boolean; 
+    existingSession?: { 
+      id: string; 
+      name: string | null; 
+      createdAt: string; 
+      lastActivity: string | null;
+    } 
+  }> {
+    const response = await fetch(`${API_BASE}/sessions/check-branch?environmentId=${environmentId}&branch=${encodeURIComponent(branch)}`, {
+      headers: getHeaders(false),
+    });
+    
+    if (!response.ok) throw new Error('Failed to check branch availability');
+    return response.json();
   },
 
   // GitHub authentication

@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Plus, Terminal, Trash2, ArrowLeft, GitBranch, Folder, Clock, Play, Square, Settings, Bot, Grid3X3, List, User, Github, Check, X } from 'lucide-react';
+import { Plus, Terminal, Trash2, ArrowLeft, GitBranch, Folder, Clock, Play, Square, Settings, Bot, Grid3X3, List, User, Github, Check, X, AlertCircle } from 'lucide-react';
 import { api } from '../api/client';
 import type { Environment as EnvironmentType, Session } from '../api/client';
 import { Button } from '../components/ui/button';
@@ -10,13 +10,20 @@ import { Badge } from '../components/ui/badge';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '../components/ui/dropdown-menu';
 import { CreateSessionDialog } from '../components/CreateSessionDialog';
 import { useGitHub } from '../contexts/GitHubContext';
+import { Alert, AlertDescription, AlertTitle } from '../components/ui/alert';
+import { useAuth } from '../contexts/AuthContext';
 
 export function Environment() {
   const { environmentId } = useParams<{ environmentId: string }>();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const [userId] = useState(() => localStorage.getItem('userId') || `user-${Date.now()}`);
+  const { user } = useAuth();
+  const userId = user?.id;
   const { isConnected: isGitHubConnected, username: githubUsername } = useGitHub();
+  const [branchConflictError, setBranchConflictError] = useState<{
+    branch: string;
+    existingSession: { id: string; name: string | null };
+  } | null>(null);
 
   const { data: environment, isLoading } = useQuery({
     queryKey: ['environment', environmentId],
@@ -33,7 +40,8 @@ export function Environment() {
 
   const { data: agentsData } = useQuery({
     queryKey: ['agents', userId],
-    queryFn: () => api.getUserAgents(userId),
+    queryFn: () => userId ? api.getUserAgents(userId) : Promise.resolve({ agents: [] }),
+    enabled: !!userId,
   });
 
   const createSessionMutation = useMutation({
@@ -46,10 +54,18 @@ export function Environment() {
       api.createSession(environmentId!, name, workingDirectory, sessionType, agentId),
     onSuccess: (session) => {
       queryClient.invalidateQueries({ queryKey: ['sessions', environmentId] });
+      setBranchConflictError(null);
       navigate(`/terminal/${session.id}?environmentId=${environmentId}`);
     },
-    onError: (error) => {
+    onError: (error: any) => {
       console.error('Failed to create session:', error);
+      if (error.code === 'BRANCH_IN_USE' && error.existingSession) {
+        setBranchConflictError({
+          branch: environment?.branch || 'main',
+          existingSession: error.existingSession,
+        });
+        setShowCreateDialog(false);
+      }
     },
   });
 
@@ -220,6 +236,39 @@ export function Environment() {
         </CardContent>
       </Card>
 
+      {branchConflictError && (
+        <Alert>
+          <AlertCircle className="h-4 w-4" />
+          <AlertTitle>Branch Already In Use</AlertTitle>
+          <AlertDescription>
+            <p className="mb-2">
+              The branch <code className="font-mono">{branchConflictError.branch}</code> is already being used by another session: 
+              <strong className="ml-1">
+                {branchConflictError.existingSession.name || `Session ${branchConflictError.existingSession.id.substring(0, 8)}`}
+              </strong>
+            </p>
+            <div className="flex gap-2">
+              <Button
+                size="sm"
+                onClick={() => {
+                  navigate(`/terminal/${branchConflictError.existingSession.id}?environmentId=${environmentId}`);
+                  setBranchConflictError(null);
+                }}
+              >
+                Go to Existing Session
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => setBranchConflictError(null)}
+              >
+                Dismiss
+              </Button>
+            </div>
+          </AlertDescription>
+        </Alert>
+      )}
+
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-2xl font-semibold tracking-tight">Sessions</h2>
@@ -282,8 +331,14 @@ export function Environment() {
                             <User className="h-3 w-3" />
                             <span>tmux: {session.tmuxSessionName}</span>
                           </div>
+                          {session.gitBranch && (
+                            <div className="flex items-center gap-1">
+                              <GitBranch className="h-3 w-3" />
+                              <span>{session.gitBranch}</span>
+                            </div>
+                          )}
                           <div className="flex items-center gap-1">
-                            <GitBranch className="h-3 w-3" />
+                            <Folder className="h-3 w-3" />
                             <span>{session.workingDirectory}</span>
                           </div>
                         </div>
@@ -342,6 +397,12 @@ export function Environment() {
                     <div className="flex items-center gap-1 text-xs">
                       <span>tmux: {session.tmuxSessionName}</span>
                     </div>
+                    {session.gitBranch && (
+                      <div className="flex items-center gap-1 text-xs">
+                        <GitBranch className="h-3 w-3" />
+                        <span>{session.gitBranch}</span>
+                      </div>
+                    )}
                     <div className="flex items-center gap-1 text-xs">
                       <Folder className="h-3 w-3" />
                       <span>{session.workingDirectory}</span>

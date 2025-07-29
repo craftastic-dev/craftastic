@@ -78,7 +78,38 @@ export const sessionRoutes: FastifyPluginAsync = async (server) => {
         .executeTakeFirst();
 
       let finalWorkingDirectory = workingDirectory;
+      let sessionBranch = environmentDetails?.branch || 'main';
+      
       if (environmentDetails?.repository_url) {
+        // Check if another session already exists for this branch
+        const existingBranchSession = await db
+          .selectFrom('sessions')
+          .select(['id', 'name', 'created_at', 'last_activity'])
+          .where('environment_id', '=', environmentId)
+          .where('git_branch', '=', sessionBranch)
+          .where('status', '!=', 'dead')
+          .where('id', '!=', sessionData.id) // Exclude the session we just created
+          .executeTakeFirst();
+          
+        if (existingBranchSession) {
+          // Delete the session we just created since branch is already in use
+          await db
+            .deleteFrom('sessions')
+            .where('id', '=', sessionData.id)
+            .execute();
+            
+          reply.code(409).send({
+            error: 'BRANCH_IN_USE',
+            message: `A session already exists for branch '${sessionBranch}'`,
+            existingSession: {
+              id: existingBranchSession.id,
+              name: existingBranchSession.name,
+              createdAt: existingBranchSession.created_at.toISOString(),
+              lastActivity: existingBranchSession.last_activity?.toISOString()
+            }
+          });
+          return;
+        }
         try {
           const worktreePath = await worktreeService.createWorktree({
             environmentId,
@@ -91,11 +122,12 @@ export const sessionRoutes: FastifyPluginAsync = async (server) => {
           const relativeWorktreePath = worktreePath.replace(dataDir, '');
           finalWorkingDirectory = `/data${relativeWorktreePath}`;
           
-          // Update session with the container working directory
+          // Update session with the container working directory and branch
           await db
             .updateTable('sessions')
             .set({
               working_directory: finalWorkingDirectory,
+              git_branch: sessionBranch,
               updated_at: new Date(),
             })
             .where('id', '=', sessionData.id)
@@ -127,6 +159,7 @@ export const sessionRoutes: FastifyPluginAsync = async (server) => {
         lastActivity: updatedSessionData.last_activity?.toISOString(),
         agentId: updatedSessionData.agent_id,
         sessionType: updatedSessionData.session_type,
+        gitBranch: updatedSessionData.git_branch,
       };
 
       reply.send(session);
@@ -160,6 +193,7 @@ export const sessionRoutes: FastifyPluginAsync = async (server) => {
         lastActivity: row.last_activity?.toISOString(),
         agentId: row.agent_id,
         sessionType: row.session_type,
+        gitBranch: row.git_branch,
       }));
       
       reply.send({ sessions: sessionList });
@@ -197,6 +231,7 @@ export const sessionRoutes: FastifyPluginAsync = async (server) => {
         lastActivity: row.last_activity?.toISOString(),
         agentId: row.agent_id,
         sessionType: row.session_type,
+        gitBranch: row.git_branch,
       };
       
       reply.send(session);
@@ -239,12 +274,46 @@ export const sessionRoutes: FastifyPluginAsync = async (server) => {
         lastActivity: row.last_activity?.toISOString(),
         agentId: row.agent_id,
         sessionType: row.session_type,
+        gitBranch: row.git_branch,
       };
       
       reply.send(session);
     } catch (error) {
       console.error('Error updating session:', error);
       reply.code(500).send({ error: 'Failed to update session' });
+    }
+  });
+
+  // Check if a branch is available for a new session
+  server.get('/check-branch', async (request, reply) => {
+    const { environmentId, branch } = request.query as { environmentId: string; branch: string };
+    
+    if (!environmentId || !branch) {
+      reply.code(400).send({ error: 'environmentId and branch are required' });
+      return;
+    }
+    
+    try {
+      const existingSession = await db
+        .selectFrom('sessions')
+        .select(['id', 'name', 'created_at', 'last_activity'])
+        .where('environment_id', '=', environmentId)
+        .where('git_branch', '=', branch)
+        .where('status', '!=', 'dead')
+        .executeTakeFirst();
+        
+      reply.send({
+        available: !existingSession,
+        existingSession: existingSession ? {
+          id: existingSession.id,
+          name: existingSession.name,
+          createdAt: existingSession.created_at.toISOString(),
+          lastActivity: existingSession.last_activity?.toISOString()
+        } : null
+      });
+    } catch (error) {
+      console.error('Error checking branch availability:', error);
+      reply.code(500).send({ error: 'Failed to check branch availability' });
     }
   });
 

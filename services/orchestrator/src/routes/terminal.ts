@@ -1,6 +1,7 @@
 import { FastifyPluginAsync } from 'fastify';
 import { createTerminalSession, getTerminalSession } from '../services/terminal';
 import { getDatabase } from '../lib/kysely';
+import { verifySessionExists } from '../services/session-cleanup';
 
 export const terminalRoutes: FastifyPluginAsync = async (server) => {
   const db = getDatabase();
@@ -46,6 +47,20 @@ export const terminalRoutes: FastifyPluginAsync = async (server) => {
       if (!containerId) {
         connection.socket.close(1008, 'Environment container not available');
         return;
+      }
+      
+      // Verify the session's tmux session still exists
+      const sessionExists = await verifySessionExists(sessionId);
+      if (!sessionExists && sessionWithEnv.status !== 'dead') {
+        console.log(`[Terminal WebSocket] Session ${sessionId} tmux session no longer exists, marking as dead`);
+        await db
+          .updateTable('sessions')
+          .set({ 
+            status: 'dead',
+            updated_at: new Date()
+          })
+          .where('id', '=', sessionId)
+          .execute();
       }
 
       // Handle agent sessions differently
@@ -123,7 +138,31 @@ export const terminalRoutes: FastifyPluginAsync = async (server) => {
       }
 
       // Regular session
-      const terminal = await createTerminalSession(sessionId, containerId, sessionWithEnv.tmux_session_name);
+      let terminal;
+      try {
+        terminal = await createTerminalSession(
+          sessionId, 
+          containerId, 
+          sessionWithEnv.tmux_session_name,
+          sessionWithEnv.working_directory
+        );
+      } catch (error) {
+        console.error(`[Terminal WebSocket] Failed to create terminal session:`, error);
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error creating terminal session';
+        
+        // Send error to client
+        connection.socket.send(JSON.stringify({
+          type: 'error',
+          message: `Failed to create terminal session: ${errorMessage}`,
+        }));
+        
+        // Close connection after a delay to ensure message is sent
+        setTimeout(() => {
+          connection.socket.close(1011, errorMessage);
+        }, 100);
+        
+        return;
+      }
 
       terminal.on('data', (data: string) => {
         connection.socket.send(JSON.stringify({
@@ -133,6 +172,7 @@ export const terminalRoutes: FastifyPluginAsync = async (server) => {
       });
 
       terminal.on('error', (error: Error) => {
+        console.error(`[Terminal WebSocket] Terminal error for session ${sessionId}:`, error);
         connection.socket.send(JSON.stringify({
           type: 'error',
           message: error.message,
@@ -140,7 +180,8 @@ export const terminalRoutes: FastifyPluginAsync = async (server) => {
       });
 
       terminal.on('close', () => {
-        connection.socket.close();
+        console.log(`[Terminal WebSocket] Terminal closed for session ${sessionId}`);
+        connection.socket.close(1000, 'Terminal session ended');
       });
 
       connection.socket.on('message', (message: Buffer) => {
@@ -165,7 +206,9 @@ export const terminalRoutes: FastifyPluginAsync = async (server) => {
       });
 
     } catch (error) {
-      connection.socket.close(1011, 'Failed to create session');
+      console.error(`Failed to create terminal session for ${sessionId}:`, error);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      connection.socket.close(1011, `Failed to create session: ${errorMessage}`);
     }
   });
 };

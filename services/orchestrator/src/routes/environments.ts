@@ -28,6 +28,7 @@ export interface Session {
   lastActivity?: string;
   agentId?: string;
   sessionType: 'terminal' | 'agent';
+  gitBranch?: string;
 }
 
 export async function environmentRoutes(fastify: FastifyInstance) {
@@ -143,6 +144,7 @@ export async function environmentRoutes(fastify: FastifyInstance) {
           createdAt: session.created_at.toISOString(),
           updatedAt: session.updated_at.toISOString(),
           lastActivity: session.last_activity?.toISOString(),
+          gitBranch: session.git_branch,
         });
         return acc;
       }, {} as Record<string, Session[]>);
