@@ -24,15 +24,33 @@ export const sessionRoutes: FastifyPluginAsync = async (server) => {
     };
 
     try {
-      // Verify environment exists
+      // Verify environment exists and has a container
       const environment = await db
         .selectFrom('environments')
-        .select('id')
+        .select(['id', 'container_id', 'status'])
         .where('id', '=', environmentId)
         .executeTakeFirst();
 
       if (!environment) {
         reply.code(404).send({ error: 'Environment not found' });
+        return;
+      }
+
+      // Check if environment has a container
+      if (!environment.container_id) {
+        reply.code(400).send({ 
+          error: 'Environment not ready',
+          details: 'Environment does not have a Docker container. This usually means the Docker image is not built. Run:\ndocker build -f services/orchestrator/docker/sandbox.Dockerfile -t craftastic-sandbox:latest .'
+        });
+        return;
+      }
+
+      // Check if environment is in error state
+      if (environment.status === 'error') {
+        reply.code(400).send({ 
+          error: 'Environment in error state',
+          details: 'The environment is in an error state. This usually means the Docker image is not built. Run:\ndocker build -f services/orchestrator/docker/sandbox.Dockerfile -t craftastic-sandbox:latest .'
+        });
         return;
       }
 

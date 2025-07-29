@@ -1,7 +1,8 @@
 import { FastifyInstance } from 'fastify';
 import { getDatabase } from '../lib/kysely';
-import { createSandbox, destroySandbox } from '../services/docker';
+import { createSandbox, destroySandbox, getDocker } from '../services/docker';
 import { userService } from '../services/user';
+import { config } from '../config';
 import os from 'os';
 
 export interface Environment {
@@ -44,10 +45,58 @@ export async function environmentRoutes(fastify: FastifyInstance) {
     };
 
     try {
+      // Check if Docker image exists BEFORE creating environment
+      const docker = getDocker();
+      const imageName = config.SANDBOX_IMAGE;
+      
+      try {
+        const images = await docker.listImages({
+          filters: {
+            reference: [imageName]
+          }
+        });
+        
+        if (images.length === 0) {
+          reply.code(400).send({
+            error: 'Docker image not found',
+            details: `Docker image '${imageName}' not found. Please build it first with:\ndocker build -f services/orchestrator/docker/sandbox.Dockerfile -t ${imageName} .`
+          });
+          return;
+        }
+      } catch (error) {
+        console.error('Error checking for Docker image:', error);
+        reply.code(500).send({
+          error: 'Failed to check Docker image',
+          details: `Failed to verify Docker image availability: ${error instanceof Error ? error.message : 'Unknown error'}`
+        });
+        return;
+      }
+      
       // Resolve user ID (handles both UUID and legacy formats)
       const resolvedUserId = await userService.resolveUserId(userId);
       
-      // Create environment record
+      // Check if environment name already exists for this user
+      const existingEnvironment = await db
+        .selectFrom('environments')
+        .select(['id', 'name'])
+        .where('user_id', '=', resolvedUserId)
+        .where('name', '=', name)
+        .executeTakeFirst();
+
+      if (existingEnvironment) {
+        reply.code(409).send({
+          error: 'Environment name already exists',
+          details: `An environment named "${name}" already exists. Please choose a different name.`,
+          suggestions: [
+            `${name}-2`,
+            `${name}-copy`,
+            `${name}-${new Date().toISOString().slice(0, 10)}`
+          ]
+        });
+        return;
+      }
+      
+      // Create environment record (only after confirming Docker image exists)
       const environment = await db
         .insertInto('environments')
         .values({
@@ -63,6 +112,8 @@ export async function environmentRoutes(fastify: FastifyInstance) {
       // Create Docker container for this environment
       // Mount the craftastic data directory so all worktrees are accessible
       const dataDir = process.env.CRAFTASTIC_DATA_DIR || os.homedir() + '/.craftastic';
+      
+      // Create Docker container
       const container = await createSandbox({
         sessionId: environment.id, // Use environment ID as session ID for now
         userId,
@@ -201,6 +252,43 @@ export async function environmentRoutes(fastify: FastifyInstance) {
     } catch (error) {
       console.error('Error fetching environment:', error);
       reply.code(500).send({ error: 'Failed to fetch environment' });
+    }
+  });
+
+  // Check environment name availability
+  fastify.get('/environments/check-name/:userId/:name', async (request, reply) => {
+    const { userId, name } = request.params as { userId: string; name: string };
+
+    try {
+      // Resolve user ID (handles both UUID and legacy formats)
+      const resolvedUserId = await userService.resolveUserId(userId);
+      
+      // Check if environment name already exists for this user
+      const existingEnvironment = await db
+        .selectFrom('environments')
+        .select(['id', 'name'])
+        .where('user_id', '=', resolvedUserId)
+        .where('name', '=', name)
+        .executeTakeFirst();
+
+      const available = !existingEnvironment;
+      const suggestions = available ? [] : [
+        `${name}-2`,
+        `${name}-copy`,
+        `${name}-${new Date().toISOString().slice(0, 10)}`
+      ];
+
+      reply.send({
+        available,
+        name,
+        suggestions,
+        message: available 
+          ? `"${name}" is available` 
+          : `"${name}" is already taken`
+      });
+    } catch (error) {
+      console.error('Error checking environment name:', error);
+      reply.code(500).send({ error: 'Failed to check environment name' });
     }
   });
 

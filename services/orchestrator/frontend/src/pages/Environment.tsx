@@ -12,6 +12,7 @@ import { CreateSessionDialog } from '../components/CreateSessionDialog';
 import { useGitHub } from '../contexts/GitHubContext';
 import { Alert, AlertDescription, AlertTitle } from '../components/ui/alert';
 import { useAuth } from '../contexts/AuthContext';
+import { useToast } from '@/hooks/use-toast';
 
 export function Environment() {
   const { environmentId } = useParams<{ environmentId: string }>();
@@ -19,6 +20,7 @@ export function Environment() {
   const queryClient = useQueryClient();
   const { user } = useAuth();
   const userId = user?.id;
+  const { toast } = useToast();
   const { isConnected: isGitHubConnected, username: githubUsername } = useGitHub();
   const [branchConflictError, setBranchConflictError] = useState<{
     branch: string;
@@ -59,6 +61,46 @@ export function Environment() {
     },
     onError: (error: any) => {
       console.error('Failed to create session:', error);
+      
+      // Handle Docker image not found error
+      const errorMessage = error?.message || 'Failed to create session';
+      const errorDetails = error?.response?.data?.details || error?.details || '';
+      
+      if (errorMessage.includes('Environment not ready') || errorDetails.includes('Docker image')) {
+        const dockerCommand = errorDetails.match(/docker build[^\n]+/)?.[0] || 
+          'docker build -f services/orchestrator/docker/sandbox.Dockerfile -t craftastic-sandbox:latest .';
+        
+        toast({
+          title: "Environment Not Ready",
+          description: (
+            <div className="space-y-3">
+              <p>Docker image not found. Run this command to build it:</p>
+              <div className="flex items-center gap-2">
+                <code className="flex-1 bg-muted px-2 py-1 rounded text-xs font-mono">
+                  {dockerCommand}
+                </code>
+                <button
+                  className="inline-flex items-center justify-center rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 border border-input bg-background hover:bg-accent hover:text-accent-foreground h-8 px-3"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    navigator.clipboard.writeText(dockerCommand);
+                    toast({
+                      title: "Copied!",
+                      description: "Command copied to clipboard",
+                      duration: 2000,
+                    });
+                  }}
+                >
+                  Copy
+                </button>
+              </div>
+            </div>
+          ),
+          duration: 30000, // Show for 30 seconds
+        });
+        return;
+      }
+      
       if (error.code === 'BRANCH_IN_USE' && error.existingSession) {
         setBranchConflictError({
           branch: environment?.branch || 'main',

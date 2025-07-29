@@ -114,7 +114,14 @@ export const api = {
       body: JSON.stringify({ userId, name, repositoryUrl, branch }),
     });
     
-    if (!response.ok) throw new Error('Failed to create environment');
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({ error: 'Failed to create environment' }));
+      const errorMessage = errorData.details || errorData.error || 'Failed to create environment';
+      const error = new Error(errorMessage);
+      (error as any).code = response.status;
+      (error as any).suggestions = errorData.suggestions;
+      throw error;
+    }
     return response.json();
   },
 
@@ -145,6 +152,20 @@ export const api = {
     if (!response.ok) throw new Error('Failed to delete environment');
   },
 
+  async checkEnvironmentName(userId: string, name: string): Promise<{
+    available: boolean;
+    name: string;
+    suggestions: string[];
+    message: string;
+  }> {
+    const response = await fetch(`${API_BASE}/environments/check-name/${userId}/${encodeURIComponent(name)}`, {
+      headers: getHeaders(false),
+    });
+    
+    if (!response.ok) throw new Error('Failed to check environment name');
+    return response.json();
+  },
+
   // Session management  
   async createSession(environmentId: string, name?: string, workingDirectory = '/', sessionType: 'terminal' | 'agent' = 'terminal', agentId?: string): Promise<Session> {
     const response = await fetch(`${API_BASE}/sessions`, {
@@ -158,6 +179,8 @@ export const api = {
       const error = new Error(errorData.message || errorData.error || 'Failed to create session');
       (error as any).code = errorData.error;
       (error as any).existingSession = errorData.existingSession;
+      (error as any).details = errorData.details;
+      (error as any).response = { data: errorData };
       throw error;
     }
     return response.json();

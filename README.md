@@ -26,12 +26,15 @@ craftastic/
    npm install
    ```
 
-2. Build the development sandbox Docker image:
+2. **Build the development sandbox Docker image (REQUIRED)**:
    ```bash
    docker build -f services/orchestrator/docker/sandbox.Dockerfile -t craftastic-sandbox:latest .
    ```
+   
+   **⚠️ Important**: This step is mandatory. The application will fail to create development environments without this custom Docker image.
+   
    This creates a feature-rich development environment with:
-   - Git, tmux, and development tools
+   - Git, tmux, and development tools (required for terminal sessions)
    - Neovim with LunarVim configuration
    - Claude Code CLI
    - Node.js 20 and other language runtimes
@@ -82,6 +85,16 @@ This project uses:
 - React + Vite for the frontend
 
 ## Troubleshooting
+
+### Docker Image Not Found Error
+
+If you see errors like "Failed to create environment" or "Docker image 'craftastic-sandbox:latest' not found", you need to build the sandbox Docker image:
+
+```bash
+docker build -f services/orchestrator/docker/sandbox.Dockerfile -t craftastic-sandbox:latest .
+```
+
+This error occurs because the application requires a custom Docker image with tmux and other development tools installed.
 
 ### Terminal Display Issues
 

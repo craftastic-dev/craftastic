@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, Fragment, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, Link } from 'react-router-dom';
 import { Code, GitBranch, GitFork, Play, Plus, Power, Settings, X, Grid3X3, List } from "lucide-react"
@@ -11,12 +11,14 @@ import { useAuth } from '../contexts/AuthContext';
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
+import { useToast } from "@/hooks/use-toast"
 
 export function DashboardNew() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { user } = useAuth();
   const userId = user?.id;
+  const { toast } = useToast();
 
   const { data, isLoading, refetch } = useQuery({
     queryKey: ['environments', userId],
@@ -24,23 +26,6 @@ export function DashboardNew() {
     enabled: !!userId,
   });
 
-  const createMutation = useMutation({
-    mutationFn: ({ name, repositoryUrl }: { name: string; repositoryUrl?: string }) => {
-      if (!userId) throw new Error('User not authenticated');
-      return api.createEnvironment(userId, name, repositoryUrl);
-    },
-    onSuccess: (environment) => {
-      console.log('Environment created successfully:', environment);
-      // Invalidate all environment queries for this user
-      queryClient.invalidateQueries({ queryKey: ['environments', userId] });
-      // Also refetch the data immediately
-      refetch();
-      navigate(`/environment/${environment.id}`);
-    },
-    onError: (error) => {
-      console.error('Error creating environment:', error);
-    },
-  });
 
   const deleteMutation = useMutation({
     mutationFn: (environmentId: string) => api.deleteEnvironment(environmentId),
@@ -52,16 +37,74 @@ export function DashboardNew() {
 
   const { showCreateDialog, setShowCreateDialog } = useCreateEnvironment();
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('list');
+  const [dockerImageError, setDockerImageError] = useState<string | null>(null);
+  const [isCreating, setIsCreating] = useState(false);
+  
+  console.log('DashboardNew render - dockerImageError:', dockerImageError);
 
-  const handleCreateEnvironment = (name: string, repositoryUrl?: string) => {
+  const handleCreateEnvironment = async (name: string, repositoryUrl?: string) => {
     console.log('Creating environment:', { name, repositoryUrl });
     
-    createMutation.mutate({
-      name,
-      repositoryUrl,
-    });
+    // Clear any previous errors
+    setDockerImageError(null);
+    setIsCreating(true);
     
-    setShowCreateDialog(false);
+    try {
+      if (!userId) throw new Error('User not authenticated');
+      const environment = await api.createEnvironment(userId, name, repositoryUrl);
+      
+      // Success - close dialog and navigate
+      console.log('Environment created successfully:', environment);
+      queryClient.invalidateQueries({ queryKey: ['environments', userId] });
+      refetch();
+      setShowCreateDialog(false);
+      navigate(`/environment/${environment.id}`);
+    } catch (error) {
+      console.error('Error creating environment:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Failed to create environment';
+      
+      console.log('Error message:', errorMessage);
+      console.log('Checking for Docker image error...');
+      
+      // Show help if it's the Docker image error
+      if (errorMessage.toLowerCase().includes('docker') && errorMessage.toLowerCase().includes('not found')) {
+        console.log('Docker image error detected!');
+        // Extract the docker build command from the error message
+        const dockerCommand = errorMessage.match(/docker build[^\n]+/)?.[0] || 
+          'docker build -f services/orchestrator/docker/sandbox.Dockerfile -t craftastic-sandbox:latest .';
+        
+        console.log('Setting docker image error:', dockerCommand);
+        setDockerImageError(dockerCommand);
+        // Force a re-render to ensure the error is displayed
+        setTimeout(() => {
+          setDockerImageError(dockerCommand);
+        }, 0);
+      } else if ((error as any).code === 409) {
+        // Handle duplicate name error - this is already handled by the real-time validation
+        // but we show a toast as a fallback
+        const suggestions = (error as any).suggestions || [];
+        const suggestionText = suggestions.length > 0 
+          ? ` Try: ${suggestions.slice(0, 2).join(', ')}`
+          : '';
+        
+        toast({
+          title: "Environment name already exists",
+          description: `${errorMessage}${suggestionText}`,
+          variant: "destructive",
+          duration: 8000,
+        });
+      } else {
+        // Show generic error
+        toast({
+          title: "Failed to create environment",
+          description: errorMessage,
+          variant: "destructive",
+          duration: 10000,
+        });
+      }
+    } finally {
+      setIsCreating(false);
+    }
   };
 
   const environments = data?.environments || [];
@@ -178,9 +221,18 @@ export function DashboardNew() {
 
       {/* Create Environment Dialog */}
       <CreateEnvironmentDialog
+        key={dockerImageError ? 'with-error' : 'no-error'}
         open={showCreateDialog}
-        onOpenChange={setShowCreateDialog}
+        onOpenChange={(open) => {
+          setShowCreateDialog(open);
+          // Clear error when dialog is closed
+          if (!open) {
+            setDockerImageError(null);
+          }
+        }}
         onCreate={handleCreateEnvironment}
+        dockerImageError={dockerImageError}
+        onClearError={() => setDockerImageError(null)}
       />
     </div>
   )

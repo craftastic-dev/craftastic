@@ -19,6 +19,28 @@ export interface SandboxOptions {
 export async function createSandbox(options: SandboxOptions) {
   const { sessionId, userId, environmentName, sessionName, worktreeMounts = [] } = options;
   
+  // Check if the Docker image exists
+  try {
+    const images = await docker.listImages({
+      filters: {
+        reference: [config.SANDBOX_IMAGE]
+      }
+    });
+    
+    if (images.length === 0) {
+      throw new Error(
+        `Docker image '${config.SANDBOX_IMAGE}' not found. Please build it first with:\n` +
+        `docker build -f services/orchestrator/docker/sandbox.Dockerfile -t ${config.SANDBOX_IMAGE} .`
+      );
+    }
+  } catch (error) {
+    if (error instanceof Error && error.message.includes('not found')) {
+      throw error;
+    }
+    console.error('Error checking for Docker image:', error);
+    throw new Error(`Failed to check Docker image availability: ${error instanceof Error ? error.message : 'Unknown error'}`);
+  }
+  
   // Build a descriptive container name
   const nameParts = ['craftastic'];
   if (environmentName) {

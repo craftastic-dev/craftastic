@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react';
-import { Search, Loader2, Github, GitBranch, ExternalLink, Star, GitFork, Lock, Globe } from 'lucide-react';
+import { useState, useEffect, useCallback } from 'react';
+import { Search, Loader2, Github, GitBranch, ExternalLink, Star, GitFork, Lock, Globe, CheckCircle2, AlertCircle, Clock } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -12,17 +12,20 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Card, CardContent } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useGitHub } from '../contexts/GitHubContext';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../api/client';
+import { useAuth } from '../contexts/AuthContext';
 
 interface CreateEnvironmentDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onCreate: (name: string, repositoryUrl?: string) => void;
+  dockerImageError?: string | null;
+  onClearError?: () => void;
 }
 
 interface GitHubRepo {
@@ -85,11 +88,71 @@ const RepoSkeleton = () => (
   </Card>
 );
 
-export function CreateEnvironmentDialog({ open, onOpenChange, onCreate }: CreateEnvironmentDialogProps) {
+export function CreateEnvironmentDialog({ open, onOpenChange, onCreate, dockerImageError, onClearError }: CreateEnvironmentDialogProps) {
   const { isConnected } = useGitHub();
+  const { user } = useAuth();
   const [name, setName] = useState('');
   const [selectedRepo, setSelectedRepo] = useState<GitHubRepo | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [isCopied, setIsCopied] = useState(false);
+  
+  // Name validation state
+  const [nameValidation, setNameValidation] = useState<{
+    status: 'idle' | 'checking' | 'available' | 'taken';
+    message: string;
+    suggestions: string[];
+  }>({
+    status: 'idle',
+    message: '',
+    suggestions: []
+  });
+  
+  console.log('CreateEnvironmentDialog - dockerImageError:', dockerImageError);
+  
+  // Add effect to track dockerImageError changes
+  useEffect(() => {
+    console.log('dockerImageError changed to:', dockerImageError);
+  }, [dockerImageError]);
+
+  // Debounced name validation
+  const checkNameAvailability = useCallback(async (nameToCheck: string) => {
+    if (!nameToCheck.trim() || !user?.id) {
+      setNameValidation({ status: 'idle', message: '', suggestions: [] });
+      return;
+    }
+
+    setNameValidation({ status: 'checking', message: 'Checking availability...', suggestions: [] });
+
+    try {
+      const result = await api.checkEnvironmentName(user.id, nameToCheck.trim());
+      setNameValidation({
+        status: result.available ? 'available' : 'taken',
+        message: result.message,
+        suggestions: result.suggestions
+      });
+    } catch (error) {
+      console.error('Error checking name availability:', error);
+      setNameValidation({ 
+        status: 'idle', 
+        message: 'Unable to check name availability', 
+        suggestions: [] 
+      });
+    }
+  }, [user?.id]);
+
+  // Debounce name checking
+  useEffect(() => {
+    if (!name.trim()) {
+      setNameValidation({ status: 'idle', message: '', suggestions: [] });
+      return;
+    }
+
+    const timeoutId = setTimeout(() => {
+      checkNameAvailability(name);
+    }, 500);
+
+    return () => clearTimeout(timeoutId);
+  }, [name, checkNameAvailability]);
 
   // Fetch GitHub repos if connected
   const { data: reposData, isLoading: reposLoading } = useQuery({
@@ -110,6 +173,7 @@ export function CreateEnvironmentDialog({ open, onOpenChange, onCreate }: Create
       setName('');
       setSelectedRepo(null);
       setSearchQuery('');
+      setNameValidation({ status: 'idle', message: '', suggestions: [] });
     }
   }, [open]);
 
@@ -121,21 +185,48 @@ export function CreateEnvironmentDialog({ open, onOpenChange, onCreate }: Create
   }, [selectedRepo, name]);
 
   const handleCreate = () => {
-    if (!name.trim()) return;
+    if (!name.trim() || nameValidation.status === 'taken') return;
     
     const repoUrl = selectedRepo?.clone_url;
     onCreate(name.trim(), repoUrl);
   };
 
+  const getValidationIcon = () => {
+    switch (nameValidation.status) {
+      case 'checking':
+        return <Clock className="h-4 w-4 text-muted-foreground animate-spin" />;
+      case 'available':
+        return <CheckCircle2 className="h-4 w-4 text-green-500" />;
+      case 'taken':
+        return <AlertCircle className="h-4 w-4 text-red-500" />;
+      default:
+        return null;
+    }
+  };
+
+  const getValidationColor = () => {
+    switch (nameValidation.status) {
+      case 'available':
+        return 'text-green-600';
+      case 'taken':
+        return 'text-red-600';
+      case 'checking':
+        return 'text-muted-foreground';
+      default:
+        return 'text-muted-foreground';
+    }
+  };
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[600px]">
-        <DialogHeader>
-          <DialogTitle>Create New Environment</DialogTitle>
-          <DialogDescription>
-            Create a new development environment with optional Git repository
-          </DialogDescription>
-        </DialogHeader>
+        <div className="relative">
+          <DialogHeader>
+            <DialogTitle>Create New Environment</DialogTitle>
+            <DialogDescription>
+              Create a new development environment with optional Git repository
+            </DialogDescription>
+          </DialogHeader>
 
         {!isConnected ? (
           <Card className="mt-6">
@@ -288,16 +379,109 @@ export function CreateEnvironmentDialog({ open, onOpenChange, onCreate }: Create
             {selectedRepo && (
               <div className="space-y-2">
                 <Label htmlFor="env-name">Environment Name</Label>
-                <Input
-                  id="env-name"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  placeholder={selectedRepo.name}
-                />
+                <div className="relative">
+                  <Input
+                    id="env-name"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    placeholder={selectedRepo.name}
+                    className={`pr-10 ${nameValidation.status === 'taken' ? 'border-red-500 focus-visible:ring-red-500' : 
+                      nameValidation.status === 'available' ? 'border-green-500 focus-visible:ring-green-500' : ''}`}
+                  />
+                  <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                    {getValidationIcon()}
+                  </div>
+                </div>
+                
+                {/* Validation message */}
+                {nameValidation.message && (
+                  <p className={`text-sm ${getValidationColor()}`}>
+                    {nameValidation.message}
+                  </p>
+                )}
+                
+                {/* Suggestions for taken names */}
+                {nameValidation.status === 'taken' && nameValidation.suggestions.length > 0 && (
+                  <div className="space-y-2">
+                    <p className="text-sm text-muted-foreground">Try these alternatives:</p>
+                    <div className="flex flex-wrap gap-1">
+                      {nameValidation.suggestions.map((suggestion, index) => (
+                        <Button
+                          key={index}
+                          variant="outline"
+                          size="sm"
+                          className="h-7 text-xs"
+                          onClick={() => setName(suggestion)}
+                        >
+                          {suggestion}
+                        </Button>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </div>
         )}
+
+        {/* Docker Image Error Overlay */}
+        {dockerImageError && (
+            <div className="absolute inset-0 bg-background/90 backdrop-blur-sm flex items-center justify-center p-4 z-50 rounded-lg">
+              <Card className="max-w-3xl w-full shadow-xl border-2 border-orange-200 dark:border-orange-800">
+                <CardHeader className="pb-4">
+                  <CardTitle className="flex items-center gap-2 text-orange-600 dark:text-orange-400">
+                    <span className="text-xl">🐳</span>
+                    Docker Build Required
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-6">
+                  <div className="space-y-3">
+                    <p className="text-base text-muted-foreground">
+                      The Docker image for development environments is missing. Please build it using the command below:
+                    </p>
+                    <div className="bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg p-4">
+                      <div className="flex items-start gap-3">
+                        <div className="flex-1">
+                          <pre className="text-sm font-mono leading-relaxed select-text cursor-text whitespace-pre-wrap break-all" style={{ userSelect: 'text', WebkitUserSelect: 'text' }}>
+                            <code style={{ userSelect: 'text', WebkitUserSelect: 'text' }}>{dockerImageError}</code>
+                          </pre>
+                        </div>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="shrink-0 ml-2"
+                          onClick={() => {
+                            navigator.clipboard.writeText(dockerImageError);
+                            setIsCopied(true);
+                            setTimeout(() => setIsCopied(false), 2000);
+                          }}
+                        >
+                          {isCopied ? '✓ Copied' : 'Copy'}
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                  
+                  <div className="bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
+                    <p className="text-sm text-blue-800 dark:text-blue-200">
+                      <strong>💡 Tip:</strong> After running this command, try creating your environment again.
+                    </p>
+                  </div>
+                  
+                  <div className="flex justify-end pt-2">
+                    <Button
+                      onClick={() => onClearError?.()}
+                      variant="default"
+                      size="lg"
+                    >
+                      Got it
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+          )}
+        </div>
 
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>
@@ -305,7 +489,13 @@ export function CreateEnvironmentDialog({ open, onOpenChange, onCreate }: Create
           </Button>
           <Button 
             onClick={handleCreate} 
-            disabled={!isConnected || !selectedRepo || !name.trim()}
+            disabled={
+              !isConnected || 
+              !selectedRepo || 
+              !name.trim() || 
+              nameValidation.status === 'taken' ||
+              nameValidation.status === 'checking'
+            }
           >
             Create Environment
           </Button>
