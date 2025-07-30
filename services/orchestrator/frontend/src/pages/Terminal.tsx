@@ -34,8 +34,22 @@ export function Terminal() {
   });
 
   useEffect(() => {
-    if (!terminalRef.current || !sessionId || !environmentId) return;
+    console.log('[Terminal.tsx] useEffect triggered', { sessionId, environmentId, hasTerminalRef: !!terminalRef.current });
+    
+    if (!terminalRef.current || !sessionId || !environmentId) {
+      console.log('[Terminal.tsx] Missing required props, skipping initialization');
+      return;
+    }
 
+    // Check container dimensions before proceeding
+    const containerRect = terminalRef.current.getBoundingClientRect();
+    console.log('[Terminal.tsx] Container dimensions:', { 
+      width: containerRect.width, 
+      height: containerRect.height,
+      element: terminalRef.current
+    });
+
+    console.log('[Terminal.tsx] Creating XTerm instance...');
     const term = new XTerm({
       // Absolute minimal configuration
       fontSize: 14,
@@ -69,7 +83,21 @@ export function Terminal() {
 
     term.loadAddon(fitAddon);
     term.loadAddon(webLinksAddon);
-    term.open(terminalRef.current);
+    
+    console.log('[Terminal.tsx] Opening terminal on element:', terminalRef.current);
+    console.log('[Terminal.tsx] Terminal state before open:', {
+      element: term.element,
+      cols: term.cols,
+      rows: term.rows
+    });
+    
+    try {
+      term.open(terminalRef.current);
+      console.log('[Terminal.tsx] Terminal opened successfully');
+    } catch (error) {
+      console.error('[Terminal.tsx] Error opening terminal:', error);
+      throw error;
+    }
     
     fitAddonRef.current = fitAddon;
     xtermRef.current = term;
@@ -95,6 +123,13 @@ export function Terminal() {
           return;
         }
         
+        // Check if terminal renderer is ready
+        if (!term.element || !term.element.querySelector('.xterm-screen')) {
+          console.warn('Terminal renderer not ready, delaying fit');
+          setTimeout(fitTerminal, 50);
+          return;
+        }
+        
         // Try to get proposed dimensions first to validate
         const proposed = fitAddon.proposeDimensions();
         if (!proposed || proposed.cols <= 0 || proposed.rows <= 0) {
@@ -114,39 +149,69 @@ export function Terminal() {
       }
     };
     
-    // Wait until fonts are fully loaded before fitting – prevents later shrink when font metrics change
-    if (document?.fonts?.ready) {
-      document.fonts.ready.then(() => {
-        fitTerminal();
-        // Focus terminal after initial setup
-        term.focus();
-        console.log('Terminal focused after fonts loaded');
-      });
-    } else {
-      // Fallback for browsers without Font Loading API
-      requestAnimationFrame(() => {
-        fitTerminal();
-        // Focus terminal after initial setup
-        term.focus();
-        console.log('Terminal focused after initial setup');
-      });
-    }
+    // Ensure terminal is fully rendered before operations
+    const waitForTerminalReady = (callback: () => void) => {
+      const checkReady = () => {
+        // Check if terminal DOM elements are ready
+        if (term.element && term.element.querySelector('.xterm-screen') && term.element.querySelector('.xterm-viewport')) {
+          callback();
+        } else {
+          requestAnimationFrame(checkReady);
+        }
+      };
+      checkReady();
+    };
+
+    // Wait until terminal is rendered and fonts are loaded
+    waitForTerminalReady(() => {
+      if (document?.fonts?.ready) {
+        document.fonts.ready.then(() => {
+          fitTerminal();
+          // Focus terminal after initial setup
+          term.focus();
+          console.log('Terminal focused after fonts loaded');
+        });
+      } else {
+        // Fallback for browsers without Font Loading API
+        setTimeout(() => {
+          fitTerminal();
+          // Focus terminal after initial setup
+          term.focus();
+          console.log('Terminal focused after initial setup');
+        }, 100);
+      }
+    });
 
     // We no longer use ResizeObserver for auto-fitting to avoid recursive shrink issues
 
     // Add a small delay before connecting WebSocket to ensure terminal is ready
     const connectWebSocket = () => {
-      const ws = new WebSocket(
-        `ws://localhost:3000/api/terminal/ws/${sessionId}?environmentId=${environmentId}`
-      );
+      // Ensure terminal is ready before connecting
+      if (!term.element || !term.element.querySelector('.xterm-screen')) {
+        console.warn('[Terminal.tsx] Terminal not ready for WebSocket connection, retrying...');
+        setTimeout(connectWebSocket, 100);
+        return null;
+      }
+
+      const wsUrl = `ws://localhost:3000/api/terminal/ws/${sessionId}?environmentId=${environmentId}`;
+      console.log('[Terminal.tsx] Creating WebSocket connection to:', wsUrl);
+      const ws = new WebSocket(wsUrl);
 
       ws.onopen = () => {
         console.log('WebSocket connected');
         
-        // Simple fit and dimension send
-        setTimeout(() => {
+        // Ensure terminal is properly sized before sending dimensions
+        const setupTerminal = () => {
           if (fitAddonRef.current && xtermRef.current) {
             try {
+              // Ensure terminal has valid dimensions
+              const proposed = fitAddonRef.current.proposeDimensions();
+              if (!proposed || proposed.cols <= 0 || proposed.rows <= 0) {
+                console.warn('Invalid dimensions on connect, retrying...');
+                setTimeout(setupTerminal, 50);
+                return;
+              }
+              
               fitAddonRef.current.fit();
               console.log(`Connected - terminal size: ${xtermRef.current.cols}x${xtermRef.current.rows}`);
               
@@ -165,7 +230,9 @@ export function Terminal() {
               console.error('Error during initial setup:', error);
             }
           }
-        }, 100);
+        };
+        
+        setTimeout(setupTerminal, 100);
       };
 
       return ws;
@@ -173,7 +240,12 @@ export function Terminal() {
 
     // Wait a bit before connecting to ensure terminal is fully initialized
     const timeoutId = setTimeout(() => {
+      console.log('[Terminal.tsx] Attempting WebSocket connection...');
       const ws = connectWebSocket();
+      if (!ws) {
+        console.log('[Terminal.tsx] WebSocket connection delayed, terminal not ready');
+        return;
+      }
 
       ws.onmessage = (event) => {
         try {
@@ -184,6 +256,20 @@ export function Terminal() {
             term.write(data.data);
           } else if (data.type === 'error') {
             term.write(`\r\n[Error] ${data.message}\r\n`);
+          } else if (data.type === 'request-resize') {
+            // Server is requesting current terminal dimensions
+            if (fitAddonRef.current && xtermRef.current) {
+              const cols = xtermRef.current.cols;
+              const rows = xtermRef.current.rows;
+              if (cols > 0 && rows > 0) {
+                ws.send(JSON.stringify({
+                  type: 'resize',
+                  cols,
+                  rows,
+                }));
+                console.log(`Sent terminal dimensions on request: ${cols}x${rows}`);
+              }
+            }
           }
         } catch (error) {
           console.error('Error parsing WebSocket message:', error);
@@ -286,6 +372,8 @@ export function Terminal() {
       clearTimeout(timeoutId);
       clearTimeout((window as any).terminalResizeTimeout);
       clearTimeout((window as any).windowResizeTimeout);
+      
+      console.log('[Terminal.tsx] Cleanup: Disposing terminal resources');
       
       if (resizeObserverRef.current) {
         resizeObserverRef.current.disconnect();

@@ -86,7 +86,7 @@ deployments (id, environment_id, app_id, status, created_at, metadata)
 
 ### Backend Development
 ```bash
-npm run dev              # Start development server with hot reload
+npm run dev              # Start development server with hot reload. Do not run this automatically, we prefer to run it manually.
 npm run build            # Build TypeScript to JavaScript
 npm run start            # Start production server
 npm run lint             # Run ESLint
@@ -167,7 +167,7 @@ GITHUB_CLIENT_ID=Ov23liz42T3AzHtmASDC
 
 # Docker (optional)
 DOCKER_HOST=/var/run/docker.sock
-SANDBOX_IMAGE=node:20-alpine
+SANDBOX_IMAGE=craftastic-sandbox:latest
 SANDBOX_MEMORY_LIMIT=512m
 SANDBOX_CPU_LIMIT=0.5
 

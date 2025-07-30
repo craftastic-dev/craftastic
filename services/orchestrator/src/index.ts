@@ -50,8 +50,10 @@ async function start() {
       ];
       
       // Allow all non-API routes (frontend routes) and assets
+      // Also skip WebSocket routes as they handle auth differently
       if (publicRoutes.includes(request.routerPath) || 
           request.routerPath?.startsWith('/assets/') ||
+          request.routerPath?.includes('/ws/') ||  // Skip WebSocket routes
           !request.routerPath?.startsWith('/api/')) {
         return;
       }

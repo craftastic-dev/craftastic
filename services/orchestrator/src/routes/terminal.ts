@@ -2,11 +2,15 @@ import { FastifyPluginAsync } from 'fastify';
 import { createTerminalSession, getTerminalSession } from '../services/terminal';
 import { getDatabase } from '../lib/kysely';
 import { verifySessionExists } from '../services/session-cleanup';
+import { getDocker } from '../services/docker';
 
 export const terminalRoutes: FastifyPluginAsync = async (server) => {
   const db = getDatabase();
 
+  console.log('[routes/terminal.ts] Terminal routes registered');
+  
   server.get('/ws/:sessionId', { websocket: true }, async (connection, request) => {
+    console.log('[routes/terminal.ts] ========== NEW WEBSOCKET CONNECTION ATTEMPT ==========');
     const { sessionId } = request.params as { sessionId: string };
     const { environmentId } = request.query as { environmentId: string };
 
@@ -46,6 +50,23 @@ export const terminalRoutes: FastifyPluginAsync = async (server) => {
 
       if (!containerId) {
         connection.socket.close(1008, 'Environment container not available');
+        return;
+      }
+      
+      // Verify container is actually running before attempting to create session
+      try {
+        const docker = getDocker();
+        const container = docker.getContainer(containerId);
+        const containerInfo = await container.inspect();
+        
+        if (!containerInfo.State.Running) {
+          console.error(`[Terminal WebSocket] Container ${containerId} is not running`);
+          connection.socket.close(1008, 'Container is not running');
+          return;
+        }
+      } catch (error) {
+        console.error(`[Terminal WebSocket] Failed to inspect container ${containerId}:`, error);
+        connection.socket.close(1008, 'Container not accessible');
         return;
       }
       
@@ -150,6 +171,20 @@ export const terminalRoutes: FastifyPluginAsync = async (server) => {
         console.error(`[Terminal WebSocket] Failed to create terminal session:`, error);
         const errorMessage = error instanceof Error ? error.message : 'Unknown error creating terminal session';
         
+        // Mark session as dead if terminal creation fails
+        try {
+          await db
+            .updateTable('sessions')
+            .set({ 
+              status: 'dead',
+              updated_at: new Date()
+            })
+            .where('id', '=', sessionId)
+            .execute();
+        } catch (dbError) {
+          console.error(`[Terminal WebSocket] Failed to update session status:`, dbError);
+        }
+        
         // Send error to client
         connection.socket.send(JSON.stringify({
           type: 'error',
@@ -183,6 +218,12 @@ export const terminalRoutes: FastifyPluginAsync = async (server) => {
         console.log(`[Terminal WebSocket] Terminal closed for session ${sessionId}`);
         connection.socket.close(1000, 'Terminal session ended');
       });
+      
+      // Send initial resize to ensure proper terminal size
+      console.log('[routes/terminal.ts] Sending initial resize request to client');
+      connection.socket.send(JSON.stringify({
+        type: 'request-resize'
+      }));
 
       connection.socket.on('message', (message: Buffer) => {
         try {
@@ -202,13 +243,25 @@ export const terminalRoutes: FastifyPluginAsync = async (server) => {
       });
 
       connection.socket.on('close', () => {
-        terminal.destroy();
+        if (terminal && typeof terminal.destroy === 'function') {
+          terminal.destroy();
+        }
       });
 
     } catch (error) {
-      console.error(`Failed to create terminal session for ${sessionId}:`, error);
+      console.error(`[routes/terminal.ts] CRITICAL ERROR - Failed to handle WebSocket for ${sessionId}:`, error);
+      if (error instanceof Error) {
+        console.error('[routes/terminal.ts] Error stack:', error.stack);
+        console.error('[routes/terminal.ts] Error message:', error.message);
+      }
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      connection.socket.close(1011, `Failed to create session: ${errorMessage}`);
+      try {
+        connection.socket.close(1011, `Failed to create session: ${errorMessage}`);
+      } catch (closeError) {
+        console.error('[routes/terminal.ts] Failed to close socket:', closeError);
+      }
     }
   });
+  
+  console.log('[routes/terminal.ts] WebSocket route handler registered successfully');
 };
