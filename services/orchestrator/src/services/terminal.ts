@@ -2,6 +2,16 @@ import { getDocker } from './docker';
 import { EventEmitter } from 'events';
 import { Writable } from 'stream';
 
+// Helper function to clean terminal output for logging
+function cleanTerminalOutput(data: string): string {
+  // Remove ANSI escape sequences and control characters
+  return data
+    .replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '') // ANSI escape sequences
+    .replace(/\x1b\][^\x07]*\x07/g, '') // OSC sequences
+    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '') // Control characters except \t, \n, \r
+    .trim();
+}
+
 export interface TerminalSession extends EventEmitter {
   id: string;
   containerId: string;
@@ -88,7 +98,8 @@ export async function createTerminalSession(
     `;
   }
   
-  console.log(`[Terminal] Full command to execute: ${tmuxCommand}`);
+  // Commented out to reduce console noise - uncomment for debugging
+  // console.log(`[Terminal] Full command to execute: ${tmuxCommand}`);
   
   // First, let's test with a simple command to verify the Docker exec works
   const testCommand = workingDirectory 
@@ -102,7 +113,7 @@ export async function createTerminalSession(
   const commandToRun = DEBUG_MODE ? testCommand : tmuxCommand;
   
   const tmuxCmd = ['/bin/bash', '-c', commandToRun];
-  console.log(`[Terminal] Docker exec command array:`, tmuxCmd);
+  // console.log(`[Terminal] Docker exec command array:`, tmuxCmd);
   
   if (DEBUG_MODE) {
     console.warn(`[Terminal] DEBUG MODE ENABLED - Running test command instead of tmux`);
@@ -229,14 +240,19 @@ export async function createTerminalSession(
   const stdout = new Writable({
     write(chunk, encoding, callback) {
       const data = chunk.toString();
-      console.log(`[terminal.ts] stdout (${sessionId}):`, data.substring(0, 100) + (data.length > 100 ? '...' : ''));
+      const cleanData = cleanTerminalOutput(data);
+      
+      // Only log if there's meaningful content after cleaning
+      if (cleanData.length > 0) {
+        console.log(`[terminal.ts] stdout (${sessionId}):`, cleanData.substring(0, 100) + (cleanData.length > 100 ? '...' : ''));
+      }
       
       // Check for our echo messages to confirm successful connection
       if (!isConnected && data.includes('[Terminal]')) {
         isConnected = true;
         console.log('[terminal.ts] Terminal connection confirmed via stdout');
         if (data.includes('ERROR:')) {
-          console.error(`[terminal.ts] Session error detected in stdout: ${data}`);
+          console.error(`[terminal.ts] Session error detected in stdout: ${cleanData}`);
           session.emit('error', new Error(data));
         }
       }
@@ -249,7 +265,12 @@ export async function createTerminalSession(
   const stderr = new Writable({
     write(chunk, encoding, callback) {
       const data = chunk.toString();
-      console.error(`[terminal.ts] stderr (${sessionId}):`, data);
+      const cleanData = cleanTerminalOutput(data);
+      
+      // Only log stderr if there's meaningful content after cleaning
+      if (cleanData.length > 0) {
+        console.error(`[terminal.ts] stderr (${sessionId}):`, cleanData);
+      }
       
       // Collect stderr for error reporting
       errorBuffer += data;

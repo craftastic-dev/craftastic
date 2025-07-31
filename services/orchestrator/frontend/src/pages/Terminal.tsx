@@ -8,7 +8,7 @@ import { Maximize2, Minimize2, ArrowLeft, FileText, PanelRightOpen, PanelRightCl
 import 'xterm/css/xterm.css';
 import { Button } from '../components/ui/button';
 import { GitPanel } from '../components/GitPanel';
-import { api } from '../api/client';
+import { api, ensureValidToken } from '../api/client';
 
 export function Terminal() {
   const { sessionId } = useParams<{ sessionId: string }>();
@@ -185,7 +185,7 @@ export function Terminal() {
     // We no longer use ResizeObserver for auto-fitting to avoid recursive shrink issues
 
     // Add a small delay before connecting WebSocket to ensure terminal is ready
-    const connectWebSocket = () => {
+    const connectWebSocket = async () => {
       // Ensure terminal is ready before connecting
       if (!term.element || !term.element.querySelector('.xterm-screen')) {
         console.warn('[Terminal.tsx] Terminal not ready for WebSocket connection, retrying...');
@@ -193,8 +193,29 @@ export function Terminal() {
         return null;
       }
 
-      const wsUrl = `ws://localhost:3000/api/terminal/ws/${sessionId}?environmentId=${environmentId}`;
-      console.log('[Terminal.tsx] Creating WebSocket connection to:', wsUrl);
+      // Check and refresh token if needed
+      console.log('[Terminal.tsx] Checking token validity before WebSocket connection...');
+      const tokenValid = await ensureValidToken();
+      if (!tokenValid) {
+        console.error('[Terminal.tsx] Failed to ensure valid token');
+        term.write('\r\n[Error] Authentication failed. Please log in again.\r\n');
+        // Redirect to login after a delay
+        setTimeout(() => {
+          window.location.reload(); // This will show the auth form
+        }, 2000);
+        return null;
+      }
+
+      // Get auth token for WebSocket authentication
+      const accessToken = localStorage.getItem('accessToken');
+      if (!accessToken) {
+        console.error('[Terminal.tsx] No access token found after refresh attempt');
+        term.write('\r\n[Error] Not authenticated\r\n');
+        return null;
+      }
+      
+      const wsUrl = `ws://localhost:3000/api/terminal/ws/${sessionId}?environmentId=${environmentId}&token=${encodeURIComponent(accessToken)}`;
+      console.log('[Terminal.tsx] Creating WebSocket connection (with auth)');
       const ws = new WebSocket(wsUrl);
 
       ws.onopen = () => {
@@ -239,9 +260,9 @@ export function Terminal() {
     };
 
     // Wait a bit before connecting to ensure terminal is fully initialized
-    const timeoutId = setTimeout(() => {
+    const timeoutId = setTimeout(async () => {
       console.log('[Terminal.tsx] Attempting WebSocket connection...');
-      const ws = connectWebSocket();
+      const ws = await connectWebSocket();
       if (!ws) {
         console.log('[Terminal.tsx] WebSocket connection delayed, terminal not ready');
         return;
@@ -281,9 +302,37 @@ export function Terminal() {
         term.write('\r\n[Connection Error]\r\n');
       };
 
-      ws.onclose = (event) => {
+      ws.onclose = async (event) => {
         console.log('WebSocket disconnected', event.code, event.reason);
-        term.write('\r\n[Disconnected]\r\n');
+        
+        // Handle authentication failure (code 1008)
+        if (event.code === 1008 && event.reason.includes('authentication')) {
+          console.log('[Terminal.tsx] WebSocket closed due to authentication failure, attempting token refresh...');
+          term.write('\r\n[Authentication failed, refreshing token...]\r\n');
+          
+          // Try to refresh token and reconnect
+          const tokenValid = await ensureValidToken();
+          if (tokenValid) {
+            console.log('[Terminal.tsx] Token refreshed successfully, reconnecting...');
+            term.write('[Reconnecting...]\r\n');
+            
+            // Reconnect with new token
+            setTimeout(async () => {
+              const newWs = await connectWebSocket();
+              if (newWs && newWs instanceof WebSocket) {
+                wsRef.current = newWs;
+              }
+            }, 1000);
+          } else {
+            console.error('[Terminal.tsx] Failed to refresh token, redirecting to login...');
+            term.write('\r\n[Authentication failed. Please log in again.]\r\n');
+            setTimeout(() => {
+              window.location.reload(); // This will show the auth form
+            }, 2000);
+          }
+        } else {
+          term.write('\r\n[Disconnected]\r\n');
+        }
       };
 
       term.onData((data) => {

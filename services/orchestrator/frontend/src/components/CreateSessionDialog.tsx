@@ -16,6 +16,7 @@ interface CreateSessionDialogProps {
   onOpenChange: (open: boolean) => void;
   onCreateSession: (data: {
     name?: string;
+    branch?: string;
     workingDirectory: string;
     sessionType: 'terminal' | 'agent';
     agentId?: string;
@@ -32,6 +33,7 @@ export function CreateSessionDialog({
   isCreating 
 }: CreateSessionDialogProps) {
   const [sessionName, setSessionName] = useState('');
+  const [branch, setBranch] = useState('');
   const [workingDirectory, setWorkingDirectory] = useState('/workspace');
   const [sessionType, setSessionType] = useState<'terminal' | 'agent'>('terminal');
   const [selectedAgentId, setSelectedAgentId] = useState('');
@@ -41,6 +43,7 @@ export function CreateSessionDialog({
     
     onCreateSession({
       name: sessionName.trim() || undefined,
+      branch: branch.trim() || undefined,
       workingDirectory: workingDirectory.trim(),
       sessionType,
       agentId: sessionType === 'agent' ? selectedAgentId : undefined,
@@ -48,6 +51,7 @@ export function CreateSessionDialog({
 
     // Reset form
     setSessionName('');
+    setBranch('');
     setWorkingDirectory('/workspace');
     setSessionType('terminal');
     setSelectedAgentId('');
@@ -108,12 +112,34 @@ export function CreateSessionDialog({
           <hr className="border-t" />
 
           <div className="space-y-2">
-            <Label htmlFor="session-name">Name (Optional)</Label>
+            <Label htmlFor="branch">Branch/Worktree</Label>
+            <Input
+              id="branch"
+              value={branch}
+              onChange={(e) => {
+                const newBranch = e.target.value;
+                setBranch(newBranch);
+                // Auto-fill session name with branch name if user hasn't manually edited it
+                // or if the current session name matches the previous branch value
+                if (!sessionName || sessionName === branch) {
+                  setSessionName(newBranch);
+                }
+              }}
+              placeholder="main, feature-branch, bugfix-123..."
+              required
+            />
+            <p className="text-xs text-muted-foreground">
+              Enter the branch name to work on. If it doesn't exist, it will be created from the default branch.
+            </p>
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="session-name">Session Name (Optional)</Label>
             <Input
               id="session-name"
               value={sessionName}
               onChange={(e) => setSessionName(e.target.value)}
-              placeholder="main, feature-branch, etc."
+              placeholder="Defaults to branch name"
             />
           </div>
 

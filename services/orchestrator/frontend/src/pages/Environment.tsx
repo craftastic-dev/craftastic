@@ -47,13 +47,14 @@ export function Environment() {
   });
 
   const createSessionMutation = useMutation({
-    mutationFn: ({ name, workingDirectory, sessionType, agentId }: { 
+    mutationFn: ({ name, branch, workingDirectory, sessionType, agentId }: { 
       name?: string; 
+      branch?: string;
       workingDirectory?: string; 
       sessionType?: 'terminal' | 'agent';
       agentId?: string;
     }) =>
-      api.createSession(environmentId!, name, workingDirectory, sessionType, agentId),
+      api.createSession(environmentId!, name, branch, workingDirectory, sessionType, agentId),
     onSuccess: (session) => {
       queryClient.invalidateQueries({ queryKey: ['sessions', environmentId] });
       setBranchConflictError(null);
@@ -123,6 +124,7 @@ export function Environment() {
 
   const handleCreateSession = (data: {
     name?: string;
+    branch?: string;
     workingDirectory: string;
     sessionType: 'terminal' | 'agent';
     agentId?: string;

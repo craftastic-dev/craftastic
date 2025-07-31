@@ -12,12 +12,14 @@ export const sessionRoutes: FastifyPluginAsync = async (server) => {
     const { 
       environmentId, 
       name, 
+      branch,
       workingDirectory = '/workspace',
       sessionType = 'terminal',
       agentId 
     } = request.body as {
       environmentId: string;
       name?: string;
+      branch?: string;
       workingDirectory?: string;
       sessionType?: 'terminal' | 'agent';
       agentId?: string;
@@ -68,9 +70,22 @@ export const sessionRoutes: FastifyPluginAsync = async (server) => {
         }
       }
 
+      // Get environment details early to determine branch
+      const environmentDetails = await db
+        .selectFrom('environments')
+        .select(['repository_url', 'branch'])
+        .where('id', '=', environmentId)
+        .executeTakeFirst();
+
+      // Use provided branch or fall back to environment's branch or 'main'
+      let sessionBranch = branch || environmentDetails?.branch || 'main';
+      
+      // If name is not provided, default to the branch name
+      const sessionName = name || sessionBranch;
+
       // Generate unique tmux session name
       const timestamp = Date.now();
-      const tmuxSessionName = name ? `${name}-${timestamp}` : 
+      const tmuxSessionName = sessionName ? `${sessionName}-${timestamp}` : 
         sessionType === 'agent' ? `agent-${timestamp}` : `session-${timestamp}`;
 
       // Create session record
@@ -78,7 +93,7 @@ export const sessionRoutes: FastifyPluginAsync = async (server) => {
         .insertInto('sessions')
         .values({
           environment_id: environmentId,
-          name,
+          name: sessionName,
           tmux_session_name: tmuxSessionName,
           working_directory: workingDirectory,
           status: 'inactive',
@@ -88,15 +103,7 @@ export const sessionRoutes: FastifyPluginAsync = async (server) => {
         .returningAll()
         .executeTakeFirstOrThrow();
 
-      // If environment has a repository, create a worktree for this session
-      const environmentDetails = await db
-        .selectFrom('environments')
-        .select(['repository_url', 'branch'])
-        .where('id', '=', environmentId)
-        .executeTakeFirst();
-
       let finalWorkingDirectory = workingDirectory;
-      let sessionBranch = environmentDetails?.branch || 'main';
       
       if (environmentDetails?.repository_url) {
         // Check if another session already exists for this branch
@@ -133,7 +140,7 @@ export const sessionRoutes: FastifyPluginAsync = async (server) => {
             environmentId,
             sessionId: sessionData.id,
             repositoryUrl: environmentDetails.repository_url,
-            branch: environmentDetails.branch || 'main',
+            branch: sessionBranch,
           });
           // Convert host path to container path (data directory is mounted at /data)
           const dataDir = process.env.CRAFTASTIC_DATA_DIR || os.homedir() + '/.craftastic';

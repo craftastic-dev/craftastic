@@ -12,7 +12,26 @@ export const terminalRoutes: FastifyPluginAsync = async (server) => {
   server.get('/ws/:sessionId', { websocket: true }, async (connection, request) => {
     console.log('[routes/terminal.ts] ========== NEW WEBSOCKET CONNECTION ATTEMPT ==========');
     const { sessionId } = request.params as { sessionId: string };
-    const { environmentId } = request.query as { environmentId: string };
+    const { environmentId, token } = request.query as { environmentId: string; token?: string };
+
+    // Authenticate WebSocket connection
+    try {
+      if (token) {
+        // Verify the JWT token
+        const decoded = await request.server.jwt.verify(token);
+        console.log('[routes/terminal.ts] WebSocket authenticated for user:', decoded.sub);
+        // Store user info for later use if needed
+        (request as any).user = decoded;
+      } else {
+        console.error('[routes/terminal.ts] No authentication token provided');
+        connection.socket.close(1008, 'Authentication required');
+        return;
+      }
+    } catch (error) {
+      console.error('[routes/terminal.ts] Authentication failed:', error);
+      connection.socket.close(1008, 'Invalid authentication token');
+      return;
+    }
 
     if (!environmentId) {
       connection.socket.close(1008, 'Environment ID required');
@@ -43,6 +62,27 @@ export const terminalRoutes: FastifyPluginAsync = async (server) => {
 
       if (!sessionWithEnv) {
         connection.socket.close(1008, 'Session not found');
+        return;
+      }
+      
+      console.log('[Terminal WebSocket] Session details:', {
+        sessionId,
+        sessionType: sessionWithEnv.session_type,
+        agentId: sessionWithEnv.agent_id,
+        workingDirectory: sessionWithEnv.working_directory,
+        tmuxSessionName: sessionWithEnv.tmux_session_name
+      });
+      
+      // Verify the user owns this environment
+      const environment = await db
+        .selectFrom('environments')
+        .select(['user_id'])
+        .where('id', '=', environmentId)
+        .executeTakeFirst();
+        
+      if (!environment || environment.user_id !== (request as any).user.sub) {
+        console.error('[routes/terminal.ts] User does not have access to this environment');
+        connection.socket.close(1008, 'Access denied');
         return;
       }
 

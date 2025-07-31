@@ -1,5 +1,56 @@
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3000/api';
 
+// Helper function to check if token is expired or about to expire
+const isTokenExpired = (token: string, bufferMinutes: number = 5): boolean => {
+  try {
+    const payload = JSON.parse(atob(token.split('.')[1]));
+    const expiresAt = payload.exp * 1000; // Convert to milliseconds
+    const now = Date.now();
+    const bufferMs = bufferMinutes * 60 * 1000;
+    return expiresAt - now < bufferMs; // True if expires within buffer time
+  } catch (error) {
+    console.error('Failed to parse JWT token:', error);
+    return true; // Assume expired if can't parse
+  }
+};
+
+// Helper function to refresh token if needed
+export const ensureValidToken = async (): Promise<boolean> => {
+  const accessToken = localStorage.getItem('accessToken');
+  const refreshToken = localStorage.getItem('refreshToken');
+  
+  if (!accessToken || !refreshToken) {
+    return false;
+  }
+  
+  if (!isTokenExpired(accessToken)) {
+    return true; // Token is still valid
+  }
+  
+  // Token is expired or about to expire, refresh it
+  try {
+    const response = await fetch(`${API_BASE}/auth/refresh`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refreshToken }),
+    });
+    
+    if (response.ok) {
+      const result = await response.json();
+      localStorage.setItem('accessToken', result.data.accessToken);
+      localStorage.setItem('refreshToken', result.data.refreshToken);
+      return true;
+    }
+  } catch (error) {
+    console.error('Token refresh failed:', error);
+  }
+  
+  // Clear tokens if refresh failed
+  localStorage.removeItem('accessToken');
+  localStorage.removeItem('refreshToken');
+  return false;
+};
+
 // Helper function to get common headers including auth
 const getHeaders = (includeContentType: boolean = true, additionalHeaders: Record<string, string> = {}) => {
   const headers: Record<string, string> = {
@@ -108,11 +159,13 @@ export interface Container {
 export const api = {
   // Environment management
   async createEnvironment(userId: string, name: string, repositoryUrl?: string, branch = 'main'): Promise<Environment> {
-    const response = await fetch(`${API_BASE}/environments`, {
+    const makeRequest = async () => fetch(`${API_BASE}/environments`, {
       method: 'POST',
       headers: getHeaders(),
       body: JSON.stringify({ userId, name, repositoryUrl, branch }),
     });
+    
+    const response = await handleApiResponse(await makeRequest(), makeRequest);
     
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({ error: 'Failed to create environment' }));
@@ -126,28 +179,34 @@ export const api = {
   },
 
   async getUserEnvironments(userId: string): Promise<{ environments: Environment[] }> {
-    const response = await fetch(`${API_BASE}/environments/user/${userId}`, {
+    const makeRequest = async () => fetch(`${API_BASE}/environments/user/${userId}`, {
       headers: getHeaders(false),
     });
+    
+    const response = await handleApiResponse(await makeRequest(), makeRequest);
     
     if (!response.ok) throw new Error('Failed to get environments');
     return response.json();
   },
 
   async getEnvironment(environmentId: string): Promise<Environment> {
-    const response = await fetch(`${API_BASE}/environments/${environmentId}`, {
+    const makeRequest = async () => fetch(`${API_BASE}/environments/${environmentId}`, {
       headers: getHeaders(false),
     });
+    
+    const response = await handleApiResponse(await makeRequest(), makeRequest);
     
     if (!response.ok) throw new Error('Failed to get environment');
     return response.json();
   },
 
   async deleteEnvironment(environmentId: string): Promise<void> {
-    const response = await fetch(`${API_BASE}/environments/${environmentId}`, {
+    const makeRequest = async () => fetch(`${API_BASE}/environments/${environmentId}`, {
       method: 'DELETE',
       headers: getHeaders(false),
     });
+    
+    const response = await handleApiResponse(await makeRequest(), makeRequest);
     
     if (!response.ok) throw new Error('Failed to delete environment');
   },
@@ -158,21 +217,25 @@ export const api = {
     suggestions: string[];
     message: string;
   }> {
-    const response = await fetch(`${API_BASE}/environments/check-name/${userId}/${encodeURIComponent(name)}`, {
+    const makeRequest = async () => fetch(`${API_BASE}/environments/check-name/${userId}/${encodeURIComponent(name)}`, {
       headers: getHeaders(false),
     });
+    
+    const response = await handleApiResponse(await makeRequest(), makeRequest);
     
     if (!response.ok) throw new Error('Failed to check environment name');
     return response.json();
   },
 
   // Session management  
-  async createSession(environmentId: string, name?: string, workingDirectory = '/', sessionType: 'terminal' | 'agent' = 'terminal', agentId?: string): Promise<Session> {
-    const response = await fetch(`${API_BASE}/sessions`, {
+  async createSession(environmentId: string, name?: string, branch?: string, workingDirectory = '/', sessionType: 'terminal' | 'agent' = 'terminal', agentId?: string): Promise<Session> {
+    const makeRequest = async () => fetch(`${API_BASE}/sessions`, {
       method: 'POST',
       headers: getHeaders(),
-      body: JSON.stringify({ environmentId, name, workingDirectory, sessionType, agentId }),
+      body: JSON.stringify({ environmentId, name, branch, workingDirectory, sessionType, agentId }),
     });
+    
+    const response = await handleApiResponse(await makeRequest(), makeRequest);
     
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({ error: 'Failed to create session' }));
@@ -187,28 +250,34 @@ export const api = {
   },
 
   async getEnvironmentSessions(environmentId: string): Promise<{ sessions: Session[] }> {
-    const response = await fetch(`${API_BASE}/sessions/environment/${environmentId}`, {
+    const makeRequest = async () => fetch(`${API_BASE}/sessions/environment/${environmentId}`, {
       headers: getHeaders(false),
     });
+    
+    const response = await handleApiResponse(await makeRequest(), makeRequest);
     
     if (!response.ok) throw new Error('Failed to get sessions');
     return response.json();
   },
 
   async getSession(sessionId: string): Promise<Session> {
-    const response = await fetch(`${API_BASE}/sessions/${sessionId}`, {
+    const makeRequest = async () => fetch(`${API_BASE}/sessions/${sessionId}`, {
       headers: getHeaders(false),
     });
+    
+    const response = await handleApiResponse(await makeRequest(), makeRequest);
     
     if (!response.ok) throw new Error('Failed to get session');
     return response.json();
   },
 
   async deleteSession(sessionId: string): Promise<void> {
-    const response = await fetch(`${API_BASE}/sessions/${sessionId}`, {
+    const makeRequest = async () => fetch(`${API_BASE}/sessions/${sessionId}`, {
       method: 'DELETE',
       headers: getHeaders(false),
     });
+    
+    const response = await handleApiResponse(await makeRequest(), makeRequest);
     
     if (!response.ok) throw new Error('Failed to delete session');
   },
@@ -222,9 +291,11 @@ export const api = {
       lastActivity: string | null;
     } 
   }> {
-    const response = await fetch(`${API_BASE}/sessions/check-branch?environmentId=${environmentId}&branch=${encodeURIComponent(branch)}`, {
+    const makeRequest = async () => fetch(`${API_BASE}/sessions/check-branch?environmentId=${environmentId}&branch=${encodeURIComponent(branch)}`, {
       headers: getHeaders(false),
     });
+    
+    const response = await handleApiResponse(await makeRequest(), makeRequest);
     
     if (!response.ok) throw new Error('Failed to check branch availability');
     return response.json();
@@ -238,10 +309,12 @@ export const api = {
     expires_in: number;
     interval: number;
   }> {
-    const response = await fetch(`${API_BASE}/auth/github/initiate`, {
+    const makeRequest = async () => fetch(`${API_BASE}/auth/github/initiate`, {
       method: 'POST',
       headers: getHeaders(false), // No Content-Type since no body
     });
+    
+    const response = await handleApiResponse(await makeRequest(), makeRequest);
     
     if (!response.ok) throw new Error('Failed to initiate GitHub auth');
     const result = await response.json();
@@ -283,18 +356,22 @@ export const api = {
   },
 
   async disconnectGitHub(): Promise<void> {
-    const response = await fetch(`${API_BASE}/auth/github/disconnect`, {
+    const makeRequest = async () => fetch(`${API_BASE}/auth/github/disconnect`, {
       method: 'DELETE',
       headers: getHeaders(false), // No Content-Type since no body
     });
+    
+    const response = await handleApiResponse(await makeRequest(), makeRequest);
     
     if (!response.ok) throw new Error('Failed to disconnect GitHub');
   },
 
   async getGitHubStatus(): Promise<{ connected: boolean; username?: string }> {
-    const response = await fetch(`${API_BASE}/auth/github/status`, {
+    const makeRequest = async () => fetch(`${API_BASE}/auth/github/status`, {
       headers: getHeaders(false), // No Content-Type since no body
     });
+    
+    const response = await handleApiResponse(await makeRequest(), makeRequest);
     
     if (!response.ok) throw new Error('Failed to get GitHub status');
     const result = await response.json();
@@ -326,9 +403,11 @@ export const api = {
     if (params?.per_page) queryParams.append('per_page', params.per_page.toString());
     if (params?.sort) queryParams.append('sort', params.sort);
     
-    const response = await fetch(`${API_BASE}/auth/github/repos?${queryParams}`, {
+    const makeRequest = async () => fetch(`${API_BASE}/auth/github/repos?${queryParams}`, {
       headers: getHeaders(false), // No Content-Type since no body
     });
+    
+    const response = await handleApiResponse(await makeRequest(), makeRequest);
     
     if (!response.ok) throw new Error('Failed to list GitHub repositories');
     const result = await response.json();
@@ -337,11 +416,13 @@ export const api = {
 
   // Git operations (now session-based)
   async gitCommit(sessionId: string, message: string, files?: string[]): Promise<any> {
-    const response = await fetch(`${API_BASE}/git/commit/${sessionId}`, {
+    const makeRequest = async () => fetch(`${API_BASE}/git/commit/${sessionId}`, {
       method: 'POST',
       headers: getHeaders(),
       body: JSON.stringify({ message, files }),
     });
+    
+    const response = await handleApiResponse(await makeRequest(), makeRequest);
     
     if (!response.ok) {
       const error = await response.json();
@@ -351,11 +432,13 @@ export const api = {
   },
 
   async gitPush(sessionId: string, remote = 'origin', branch?: string): Promise<any> {
-    const response = await fetch(`${API_BASE}/git/push/${sessionId}`, {
+    const makeRequest = async () => fetch(`${API_BASE}/git/push/${sessionId}`, {
       method: 'POST',
       headers: getHeaders(),
       body: JSON.stringify({ remote, branch }),
     });
+    
+    const response = await handleApiResponse(await makeRequest(), makeRequest);
     
     if (!response.ok) {
       const error = await response.json();
@@ -377,9 +460,11 @@ export const api = {
     }>;
     clean: boolean;
   }> {
-    const response = await fetch(`${API_BASE}/git/status/${sessionId}`, {
+    const makeRequest = async () => fetch(`${API_BASE}/git/status/${sessionId}`, {
       headers: getHeaders(false), // No Content-Type since no body
     });
+    
+    const response = await handleApiResponse(await makeRequest(), makeRequest);
     
     if (!response.ok) {
       const error = await response.json();
