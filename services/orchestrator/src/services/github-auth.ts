@@ -203,7 +203,14 @@ export class GitHubAuthService {
       throw new Error(data.error_description || data.error || 'Unknown GitHub API error');
 
     } catch (error) {
-      console.error('[GitHubAuth] ❌ Exception in pollForToken:', error);
+      // Don't log expected GitHub device flow states as errors
+      if (error.message === 'authorization_pending' || error.message === 'slow_down' || error.message === 'expired_token') {
+        // These are expected states in the device flow, just re-throw without noisy logging
+        throw error;
+      }
+      
+      // Only log unexpected errors
+      console.error('[GitHubAuth] ❌ Unexpected exception in pollForToken:', error);
       console.error('[GitHubAuth] Error type:', typeof error);
       console.error('[GitHubAuth] Error message:', error.message);
       if (error.stack) {

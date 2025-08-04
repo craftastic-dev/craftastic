@@ -106,11 +106,7 @@ export default async function gitRoutes(fastify: FastifyInstance) {
           message: 'GitHub authentication completed',
         });
       } catch (pollError: any) {
-        console.log(`[GitHub Poll] ⚠️  Poll exception caught: ${pollError.message}`);
-        console.log(`[GitHub Poll] Error type: ${typeof pollError}`);
-        console.log(`[GitHub Poll] Error stack: ${pollError.stack}`);
-        
-        // Check if it's an authorization_pending error
+        // Check if it's an authorization_pending error (expected during device flow)
         if (pollError.message === 'authorization_pending') {
           console.log('[GitHub Poll] 🔄 Authorization still pending, returning pending status');
           return reply.send({

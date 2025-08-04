@@ -12,6 +12,8 @@ interface GitHubContextType {
   verificationUri: string | null;
   userCode: string | null;
   deviceCodeExpired: boolean;
+  enablePolling: () => void;
+  disablePolling: () => void;
 }
 
 const GitHubContext = createContext<GitHubContextType | undefined>(undefined);
@@ -23,12 +25,15 @@ export function GitHubProvider({ children }: { children: React.ReactNode }) {
   const [userCode, setUserCode] = useState<string | null>(null);
   const [deviceCodeExpired, setDeviceCodeExpired] = useState(false);
   const [pollingCleanup, setPollingCleanup] = useState<(() => void) | null>(null);
+  const [pollingEnabled, setPollingEnabled] = useState(false);
 
-  // Query GitHub connection status - poll faster while we have a device code
+  // Query GitHub connection status - controlled by polling state
   const { data: status, isLoading, refetch } = useQuery({
     queryKey: ['github-status'],
     queryFn: api.getGitHubStatus,
-    refetchInterval: deviceCode ? 2000 : 5000, // Poll every 2s during device flow, 5s otherwise
+    enabled: deviceCode !== null || pollingEnabled, // Only run during device flow or when explicitly enabled
+    refetchInterval: deviceCode ? 2000 : (pollingEnabled ? 10000 : false), // Poll every 2s during device flow, 10s when enabled, never otherwise
+    staleTime: 30000, // Consider data fresh for 30 seconds
   });
 
   // Initiate device flow
@@ -169,6 +174,14 @@ export function GitHubProvider({ children }: { children: React.ReactNode }) {
     disconnectMutation.mutate();
   };
 
+  const enablePolling = () => {
+    setPollingEnabled(true);
+  };
+
+  const disablePolling = () => {
+    setPollingEnabled(false);
+  };
+
   return (
     <GitHubContext.Provider
       value={{
@@ -181,6 +194,8 @@ export function GitHubProvider({ children }: { children: React.ReactNode }) {
         verificationUri,
         userCode,
         deviceCodeExpired,
+        enablePolling,
+        disablePolling,
       }}
     >
       {children}
