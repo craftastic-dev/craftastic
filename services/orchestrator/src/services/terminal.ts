@@ -345,16 +345,6 @@ export async function createTerminalSession(
           session.emit('error', new Error(data));
         }
         
-        // Send a welcome message and prompt to ensure terminal shows something
-        setTimeout(() => {
-          const welcomeMsg = '\r\n🎉 Terminal connected successfully!\r\n';
-          session.emit('data', welcomeMsg);
-          
-          // Send a command to refresh the prompt
-          setTimeout(() => {
-            session.write('\n'); // Send newline to trigger prompt
-          }, 500);
-        }, 1000);
       }
       
       session.emit('data', data);
