@@ -3,12 +3,14 @@ import { getDatabase } from '../lib/kysely';
 import path from 'path';
 import fs from 'fs/promises';
 import os from 'os';
+import { getDocker } from './docker';
 
 export interface WorktreeConfig {
   environmentId: string;
   sessionId: string;
   repositoryUrl: string;
   branch?: string;
+  containerId?: string;
 }
 
 export class WorktreeService {
@@ -23,7 +25,7 @@ export class WorktreeService {
    * Create a new worktree for a session
    */
   async createWorktree(config: WorktreeConfig): Promise<string> {
-    const { environmentId, sessionId, repositoryUrl, branch = 'main' } = config;
+    const { environmentId, sessionId, repositoryUrl, branch = 'main', containerId } = config;
     
     const repoPath = path.join(this.dataDir, 'repos', environmentId);
     // Use branch name for worktree path instead of session ID
@@ -31,7 +33,7 @@ export class WorktreeService {
 
     try {
       // Ensure the repo exists (clone if first time)
-      await this.ensureBareRepository(environmentId, repositoryUrl);
+      await this.ensureBareRepository(environmentId, repositoryUrl, containerId);
 
       // Check if worktree already exists for this branch
       const existingWorktree = await this.findWorktreeForBranch(repoPath, branch);
@@ -45,7 +47,7 @@ export class WorktreeService {
         }
       } else {
         // Create the worktree only if it doesn't exist
-        await this.createGitWorktree(repoPath, worktreePath, branch);
+        await this.createGitWorktree(repoPath, worktreePath, branch, containerId);
         console.log(`✅ Created new worktree for branch ${branch} at ${worktreePath}`);
       }
 
@@ -267,31 +269,66 @@ export class WorktreeService {
   /**
    * Private helper methods
    */
-  private async ensureBareRepository(environmentId: string, repositoryUrl: string): Promise<void> {
+  private async ensureBareRepository(environmentId: string, repositoryUrl: string, containerId?: string): Promise<void> {
     const repoPath = path.join(this.dataDir, 'repos', environmentId);
+    
+    // If containerId is provided, use container paths
+    const containerRepoPath = containerId ? `/data/repos/${environmentId}` : repoPath;
 
     if (await this.bareRepoExists(repoPath)) {
       // Repository already exists, fetch latest changes
-      await execPromise(`git -C "${repoPath}" fetch origin`);
+      if (containerId) {
+        const { stderr } = await this.execInContainer(containerId, `git -C "${containerRepoPath}" fetch origin`);
+        if (stderr && !stderr.includes('From ')) {
+          console.error(`Git fetch error: ${stderr}`);
+        }
+      } else {
+        await execPromise(`git -C "${repoPath}" fetch origin`);
+      }
       return;
     }
 
     // Create parent directory
     await fs.mkdir(path.dirname(repoPath), { recursive: true });
 
-    // Clone as bare repository directly into the target directory
-    await execPromise(`git clone --bare "${repositoryUrl}" "${repoPath}"`);
+    // Clone as bare repository
+    if (containerId) {
+      // Ensure directory exists in container
+      await this.execInContainer(containerId, `mkdir -p /data/repos`);
+      
+      // Clone inside container
+      const { stderr } = await this.execInContainer(containerId, `git clone --bare "${repositoryUrl}" "${containerRepoPath}"`);
+      if (stderr && !stderr.includes('Cloning into')) {
+        console.error(`Git clone error: ${stderr}`);
+        throw new Error(`Failed to clone repository: ${stderr}`);
+      }
+    } else {
+      await execPromise(`git clone --bare "${repositoryUrl}" "${repoPath}"`);
+    }
 
     console.log(`✅ Cloned bare repository for environment ${environmentId}`);
   }
 
-  private async createGitWorktree(repoPath: string, worktreePath: string, branch: string): Promise<void> {
-    // Ensure worktrees directory exists
-    const worktreesDir = path.dirname(worktreePath);
-    await fs.mkdir(worktreesDir, { recursive: true });
+  private async createGitWorktree(repoPath: string, worktreePath: string, branch: string, containerId?: string): Promise<void> {
+    // Ensure only the parent worktrees directory exists, not the branch directory itself
+    // git worktree add will create the branch directory with proper .git file
+    const worktreesParentDir = path.dirname(path.dirname(worktreePath)); // Get parent of worktrees dir
+    await fs.mkdir(path.join(worktreesParentDir, 'worktrees'), { recursive: true });
+
+    // Convert paths for container if needed
+    const containerRepoPath = containerId ? repoPath.replace(this.dataDir, '/data') : repoPath;
+    const containerWorktreePath = containerId ? worktreePath.replace(this.dataDir, '/data') : worktreePath;
 
     // Get available branches from bare repository
-    const { stdout: showRef } = await execPromise(`git -C "${repoPath}" show-ref --heads`);
+    let showRef: string;
+    if (containerId) {
+      const result = await this.execInContainer(containerId, `git -C "${containerRepoPath}" show-ref --heads`);
+      showRef = result.stdout;
+    } else {
+      const result = await execPromise(`git -C "${repoPath}" show-ref --heads`);
+      showRef = result.stdout;
+    }
+    
     const branches = showRef
       .split('\n')
       .filter(line => line.trim())
@@ -313,15 +350,26 @@ export class WorktreeService {
 
     // Create the worktree
     try {
+      let command: string;
       // If the requested branch exists, check it out
       if (branches.includes(branch)) {
-        await execPromise(`git -C "${repoPath}" worktree add "${worktreePath}" "${branch}"`);
+        command = `git -C "${containerRepoPath}" worktree add "${containerWorktreePath}" "${branch}"`;
       } else {
         // Create new branch from default branch
-        await execPromise(`git -C "${repoPath}" worktree add -b "${branch}" "${worktreePath}" "${defaultBranch}"`);
+        command = `git -C "${containerRepoPath}" worktree add -b "${branch}" "${containerWorktreePath}" "${defaultBranch}"`;
+      }
+      
+      if (containerId) {
+        const { stderr } = await this.execInContainer(containerId, command);
+        if (stderr && !stderr.includes('Preparing worktree')) {
+          console.error(`Git worktree error: ${stderr}`);
+          throw new Error(`Failed to create worktree: ${stderr}`);
+        }
+      } else {
+        await execPromise(command);
       }
     } catch (error) {
-      console.error(`Failed to create worktree: ${error.message}`);
+      console.error(`Failed to create worktree: ${error instanceof Error ? error.message : String(error)}`);
       throw error;
     }
   }
@@ -370,6 +418,67 @@ export class WorktreeService {
     } catch {
       return null;
     }
+  }
+
+  /**
+   * Execute a command inside a container
+   */
+  private async execInContainer(containerId: string, command: string): Promise<{ stdout: string; stderr: string }> {
+    const docker = getDocker();
+    const container = docker.getContainer(containerId);
+    
+    const exec = await container.exec({
+      AttachStdout: true,
+      AttachStderr: true,
+      Cmd: ['/bin/sh', '-c', command],
+      Tty: false, // Don't use TTY for non-interactive commands
+    });
+
+    const stream = await exec.start({ hijack: true, stdin: false });
+    
+    return new Promise((resolve, reject) => {
+      let stdout = '';
+      let stderr = '';
+      
+      // Docker multiplexes stdout and stderr with 8-byte headers when Tty is false
+      stream.on('data', (chunk: Buffer) => {
+        let offset = 0;
+        
+        while (offset < chunk.length) {
+          // Check if we have enough bytes for a header
+          if (chunk.length - offset < 8) {
+            // Incomplete header, treat remaining as stdout
+            stdout += chunk.slice(offset).toString('utf8');
+            break;
+          }
+          
+          // Parse header: [stream_type, 0, 0, 0, size1, size2, size3, size4]
+          const streamType = chunk[offset];
+          const size = chunk.readUInt32BE(offset + 4);
+          
+          // Skip the 8-byte header
+          offset += 8;
+          
+          // Extract the payload
+          const payloadEnd = Math.min(offset + size, chunk.length);
+          const payload = chunk.slice(offset, payloadEnd).toString('utf8');
+          
+          if (streamType === 1) {
+            stdout += payload;
+          } else if (streamType === 2) {
+            stderr += payload;
+          }
+          
+          offset = payloadEnd;
+        }
+      });
+      
+      stream.on('end', () => {
+        resolve({ stdout, stderr });
+      });
+      
+      stream.on('error', reject);
+    });
   }
 }
 

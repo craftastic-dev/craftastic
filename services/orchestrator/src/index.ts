@@ -13,9 +13,10 @@ import { deploymentRoutes } from './routes/deployment';
 import { sessionRoutes } from './routes/sessions';
 import agentRoutes from './routes/agents';
 import authRoutes from './routes/auth';
+import { cleanupRoutes } from './routes/cleanup';
 import { setupDatabase } from './lib/database';
 import { setupViteDev } from './lib/vite-dev';
-import { cleanupStaleSessions } from './services/session-cleanup';
+import { cleanupStaleSessions, startPeriodicCleanup, stopPeriodicCleanup } from './services/session-cleanup';
 
 const server = Fastify({
   logger: {
@@ -97,6 +98,7 @@ async function start() {
     server.register(deploymentRoutes, { prefix: '/api/deployment' });
     server.register(sessionRoutes, { prefix: '/api/sessions' });
     server.register(agentRoutes, { prefix: '/api/agents' });
+    server.register(cleanupRoutes, { prefix: '/api/cleanup' });
 
     await server.listen({ 
       port: config.PORT, 
@@ -105,17 +107,28 @@ async function start() {
 
     server.log.info(`Server listening on ${config.PORT}`);
     
-    // Run session cleanup on startup
-    cleanupStaleSessions().catch(err => {
-      server.log.error('Error during initial session cleanup:', err);
-    });
+    // Start periodic cleanup of orphaned sessions
+    startPeriodicCleanup(5 * 60 * 1000); // Run every 5 minutes
     
-    // Run session cleanup periodically (every 5 minutes)
-    setInterval(() => {
-      cleanupStaleSessions().catch(err => {
-        server.log.error('Error during periodic session cleanup:', err);
-      });
-    }, 5 * 60 * 1000);
+    // Graceful shutdown
+    const shutdown = async () => {
+      console.log('\nShutting down server...');
+      
+      // Stop periodic cleanup
+      stopPeriodicCleanup();
+      
+      // Run final cleanup
+      console.log('Running final session cleanup...');
+      await cleanupStaleSessions();
+      
+      // Close server
+      await server.close();
+      console.log('Server shut down successfully');
+      process.exit(0);
+    };
+    
+    process.on('SIGTERM', shutdown);
+    process.on('SIGINT', shutdown);
   } catch (err) {
     server.log.error(err);
     process.exit(1);

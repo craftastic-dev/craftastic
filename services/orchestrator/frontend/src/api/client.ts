@@ -227,7 +227,48 @@ export const api = {
     return response.json();
   },
 
-  // Session management  
+  // Session management
+  async checkSessionName(environmentId: string, name: string): Promise<{
+    available: boolean;
+    name: string;
+    message: string;
+    existingSession?: {
+      id: string;
+      name: string;
+      createdAt: string;
+    };
+  }> {
+    const makeRequest = async () => fetch(`${API_BASE}/sessions/check-name/${environmentId}/${encodeURIComponent(name)}`, {
+      headers: getHeaders(false),
+    });
+    
+    const response = await handleApiResponse(await makeRequest(), makeRequest);
+    
+    if (!response.ok) throw new Error('Failed to check session name');
+    return response.json();
+  },
+
+  async checkBranchAvailability(environmentId: string, branch: string): Promise<{
+    available: boolean;
+    branch: string;
+    message: string;
+    existingSession?: {
+      id: string;
+      name: string;
+      branch: string;
+      createdAt: string;
+    };
+  }> {
+    const makeRequest = async () => fetch(`${API_BASE}/sessions/check-branch/${environmentId}/${encodeURIComponent(branch)}`, {
+      headers: getHeaders(false),
+    });
+    
+    const response = await handleApiResponse(await makeRequest(), makeRequest);
+    
+    if (!response.ok) throw new Error('Failed to check branch availability');
+    return response.json();
+  },
+  
   async createSession(environmentId: string, name?: string, branch?: string, workingDirectory = '/', sessionType: 'terminal' | 'agent' = 'terminal', agentId?: string): Promise<Session> {
     const makeRequest = async () => fetch(`${API_BASE}/sessions`, {
       method: 'POST',
@@ -271,6 +312,22 @@ export const api = {
     return response.json();
   },
 
+  async checkSessionStatus(sessionId: string): Promise<{
+    sessionId: string;
+    status: 'active' | 'inactive' | 'dead';
+    isRealtime: boolean;
+    checkedAt: string;
+  }> {
+    const makeRequest = async () => fetch(`${API_BASE}/sessions/${sessionId}/status`, {
+      headers: getHeaders(false),
+    });
+    
+    const response = await handleApiResponse(await makeRequest(), makeRequest);
+    
+    if (!response.ok) throw new Error('Failed to check session status');
+    return response.json();
+  },
+
   async deleteSession(sessionId: string): Promise<void> {
     const makeRequest = async () => fetch(`${API_BASE}/sessions/${sessionId}`, {
       method: 'DELETE',
@@ -282,24 +339,6 @@ export const api = {
     if (!response.ok) throw new Error('Failed to delete session');
   },
 
-  async checkBranchAvailability(environmentId: string, branch: string): Promise<{ 
-    available: boolean; 
-    existingSession?: { 
-      id: string; 
-      name: string | null; 
-      createdAt: string; 
-      lastActivity: string | null;
-    } 
-  }> {
-    const makeRequest = async () => fetch(`${API_BASE}/sessions/check-branch?environmentId=${environmentId}&branch=${encodeURIComponent(branch)}`, {
-      headers: getHeaders(false),
-    });
-    
-    const response = await handleApiResponse(await makeRequest(), makeRequest);
-    
-    if (!response.ok) throw new Error('Failed to check branch availability');
-    return response.json();
-  },
 
   // GitHub authentication
   async initiateGitHubAuth(): Promise<{

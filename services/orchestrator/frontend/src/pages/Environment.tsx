@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus, Terminal, Trash2, ArrowLeft, GitBranch, Folder, Clock, Play, Square, Settings, Bot, Grid3X3, List, User, Github, Check, X, AlertCircle } from 'lucide-react';
@@ -102,6 +102,18 @@ export function Environment() {
         return;
       }
       
+      // Handle session name conflict
+      if (error.code === 'SESSION_NAME_IN_USE' && error.existingSession) {
+        toast({
+          title: "Session Name Already In Use",
+          description: `A session named "${error.existingSession.name}" already exists in this environment.`,
+          variant: "destructive",
+          duration: 5000,
+        });
+        return;
+      }
+      
+      // Handle branch conflict
       if (error.code === 'BRANCH_IN_USE' && error.existingSession) {
         setBranchConflictError({
           branch: environment?.branch || 'main',
@@ -140,6 +152,67 @@ export function Environment() {
       hour: '2-digit',
       minute: '2-digit',
     });
+  };
+
+  // State for real-time status
+  const [sessionStatuses, setSessionStatuses] = useState<Record<string, {
+    status: string;
+    isChecking: boolean;
+    lastChecked?: Date;
+  }>>({});
+
+  // Check real-time status for a session
+  const checkSessionStatus = async (sessionId: string) => {
+    setSessionStatuses(prev => ({
+      ...prev,
+      [sessionId]: { ...prev[sessionId], isChecking: true }
+    }));
+
+    try {
+      const result = await api.checkSessionStatus(sessionId);
+      setSessionStatuses(prev => ({
+        ...prev,
+        [sessionId]: {
+          status: result.status,
+          isChecking: false,
+          lastChecked: new Date()
+        }
+      }));
+    } catch (error) {
+      console.error('Failed to check session status:', error);
+      setSessionStatuses(prev => ({
+        ...prev,
+        [sessionId]: { ...prev[sessionId], isChecking: false }
+      }));
+    }
+  };
+
+  // Check all sessions on mount and periodically
+  useEffect(() => {
+    const sessionList = sessionsData?.sessions || [];
+    if (sessionList.length > 0) {
+      // Initial check
+      sessionList.forEach(session => {
+        checkSessionStatus(session.id);
+      });
+
+      // Periodic check every 30 seconds
+      const interval = setInterval(() => {
+        sessionList.forEach(session => {
+          checkSessionStatus(session.id);
+        });
+      }, 30000);
+
+      return () => clearInterval(interval);
+    }
+  }, [sessionsData?.sessions]);
+
+  const getSessionStatus = (session: Session) => {
+    const realtimeStatus = sessionStatuses[session.id];
+    if (realtimeStatus && !realtimeStatus.isChecking) {
+      return realtimeStatus.status;
+    }
+    return session.status;
   };
 
   const getStatusColor = (status: string) => {
@@ -361,7 +434,7 @@ export function Environment() {
                   >
                     <div className="flex items-center gap-4 flex-1 min-w-0">
                       <div className="flex items-center gap-2">
-                        <div className={`h-2 w-2 rounded-full ${getStatusColor(session.status)}`} />
+                        <div className={`h-2 w-2 rounded-full ${getStatusColor(getSessionStatus(session))}`} />
                         <span className="text-2xl">
                           {getSessionTypeIcon(session.sessionType || 'terminal', session.agentId)}
                         </span>
@@ -457,9 +530,9 @@ export function Environment() {
               <CardContent className="space-y-4">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
-                    <div className={`h-2 w-2 rounded-full ${getStatusColor(session.status)}`} />
+                    <div className={`h-2 w-2 rounded-full ${getStatusColor(getSessionStatus(session))}`} />
                     <span className="text-sm text-muted-foreground">
-                      {getStatusText(session.status)}
+                      {getStatusText(getSessionStatus(session))}
                     </span>
                   </div>
                   {getSessionTypeBadge(session.sessionType || 'terminal', session.agentId)}
@@ -527,6 +600,7 @@ export function Environment() {
         onCreateSession={handleCreateSession}
         agents={agents}
         isCreating={createSessionMutation.isPending}
+        environmentId={environmentId!}
       />
     </div>
   );

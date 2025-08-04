@@ -58,8 +58,69 @@ export async function createTerminalSession(
     throw new Error(`Container not available: ${error instanceof Error ? error.message : 'Unknown error'}`);
   }
   // Use tmux for persistent sessions
-  // Use provided tmux session name or fallback to session ID
-  const actualTmuxName = tmuxSessionName || `session-${sessionId.substring(0, 8)}`;
+  // IMPORTANT: Always use the provided tmux session name from the database
+  if (!tmuxSessionName) {
+    throw new Error(`No tmux session name provided for session ${sessionId}`);
+  }
+  const actualTmuxName = tmuxSessionName;
+  
+  // Before creating/attaching, clean up any other sessions with the same name prefix
+  const sessionPrefix = actualTmuxName.split('-')[0]; // Get the name without timestamp
+  console.log(`[Terminal] Checking for duplicate sessions with prefix: ${sessionPrefix}`);
+  
+  // Clean up orphaned tmux sessions with the same prefix
+  try {
+    const container = docker.getContainer(containerId);
+    
+    // List all tmux sessions
+    const listExec = await container.exec({
+      Cmd: ['/bin/bash', '-c', 'tmux list-sessions -F "#{session_name}" 2>/dev/null || true'],
+      AttachStdout: true,
+      AttachStderr: true,
+    });
+    
+    const listStream = await listExec.start({ hijack: true });
+    let sessionsList = '';
+    
+    await new Promise((resolve) => {
+      listStream.on('data', (chunk: Buffer) => {
+        sessionsList += chunk.toString();
+      });
+      listStream.on('end', resolve);
+    });
+    
+    const existingSessions = sessionsList.split('\n').filter(s => s.trim());
+    const orphanedSessions = existingSessions.filter(s => 
+      s.startsWith(sessionPrefix + '-') && s !== actualTmuxName
+    );
+    
+    if (orphanedSessions.length > 0) {
+      console.log(`[Terminal] Found ${orphanedSessions.length} orphaned sessions to clean up:`, orphanedSessions);
+      
+      for (const orphanSession of orphanedSessions) {
+        try {
+          const killExec = await container.exec({
+            Cmd: ['tmux', 'kill-session', '-t', orphanSession],
+            AttachStdout: true,
+            AttachStderr: true,
+          });
+          
+          const killStream = await killExec.start({ hijack: true });
+          await new Promise((resolve) => {
+            killStream.on('end', resolve);
+            killStream.on('error', resolve);
+          });
+          
+          console.log(`[Terminal] Cleaned up orphaned session: ${orphanSession}`);
+        } catch (err) {
+          console.error(`[Terminal] Failed to clean up orphaned session ${orphanSession}:`, err);
+        }
+      }
+    }
+  } catch (error) {
+    console.log(`[Terminal] Could not check for orphaned sessions: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    // Continue anyway - this is just cleanup
+  }
   
   // Build command with working directory if provided
   let tmuxCommand: string;
@@ -72,11 +133,25 @@ export async function createTerminalSession(
         cd "${workingDirectory}" || exit 1
         if tmux has-session -t ${actualTmuxName} 2>/dev/null; then
           echo "[Terminal] Attaching to existing tmux session: ${actualTmuxName}"
-          tmux attach-session -t ${actualTmuxName}
+          # Use -x to create a new window size and force detach of other clients
+          if ! tmux attach-session -d -x -t ${actualTmuxName}; then
+            echo "[Terminal] ERROR: Failed to attach to tmux session ${actualTmuxName}"
+            # Try to list sessions to debug
+            echo "[Terminal] Current tmux sessions:"
+            tmux list-sessions
+            exit 1
+          fi
         else
           echo "[Terminal] Creating new tmux session: ${actualTmuxName}"
-          tmux new-session -d -s ${actualTmuxName} -c "${workingDirectory}"
-          tmux attach-session -t ${actualTmuxName}
+          if ! tmux new-session -d -s ${actualTmuxName} -c "${workingDirectory}"; then
+            echo "[Terminal] ERROR: Failed to create tmux session ${actualTmuxName}"
+            exit 1
+          fi
+          # Immediately attach after creation
+          if ! tmux attach-session -d -x -t ${actualTmuxName}; then
+            echo "[Terminal] ERROR: Failed to attach to newly created tmux session ${actualTmuxName}"
+            exit 1
+          fi
         fi
       else
         echo "[Terminal] ERROR: Working directory does not exist: ${workingDirectory}"
@@ -89,17 +164,31 @@ export async function createTerminalSession(
     tmuxCommand = `
       if tmux has-session -t ${actualTmuxName} 2>/dev/null; then
         echo "[Terminal] Attaching to existing tmux session: ${actualTmuxName}"
-        tmux attach-session -t ${actualTmuxName}
+        # Use -x to create a new window size and force detach of other clients
+        if ! tmux attach-session -d -x -t ${actualTmuxName}; then
+          echo "[Terminal] ERROR: Failed to attach to tmux session ${actualTmuxName}"
+          # Try to list sessions to debug
+          echo "[Terminal] Current tmux sessions:"
+          tmux list-sessions
+          exit 1
+        fi
       else
         echo "[Terminal] Creating new tmux session: ${actualTmuxName}"
-        tmux new-session -d -s ${actualTmuxName}
-        tmux attach-session -t ${actualTmuxName}
+        if ! tmux new-session -d -s ${actualTmuxName}; then
+          echo "[Terminal] ERROR: Failed to create tmux session ${actualTmuxName}"
+          exit 1
+        fi
+        # Immediately attach after creation
+        if ! tmux attach-session -d -x -t ${actualTmuxName}; then
+          echo "[Terminal] ERROR: Failed to attach to newly created tmux session ${actualTmuxName}"
+          exit 1
+        fi
       fi
     `;
   }
   
-  // Commented out to reduce console noise - uncomment for debugging
-  // console.log(`[Terminal] Full command to execute: ${tmuxCommand}`);
+  // Enable verbose logging to debug blank terminal issue
+  console.log(`[Terminal] Full command to execute: ${tmuxCommand}`);
   
   // First, let's test with a simple command to verify the Docker exec works
   const testCommand = workingDirectory 
@@ -108,7 +197,7 @@ export async function createTerminalSession(
   
   console.log(`[Terminal] Testing with simple command first: ${testCommand}`);
   
-  // DEBUG: Temporarily use test command to diagnose the issue
+  // DEBUG: Disable debug mode - use actual tmux command
   const DEBUG_MODE = false;
   const commandToRun = DEBUG_MODE ? testCommand : tmuxCommand;
   
@@ -244,7 +333,7 @@ export async function createTerminalSession(
       
       // Only log if there's meaningful content after cleaning
       if (cleanData.length > 0) {
-        console.log(`[terminal.ts] stdout (${sessionId}):`, cleanData.substring(0, 100) + (cleanData.length > 100 ? '...' : ''));
+        console.log(`[terminal.ts] stdout (${sessionId}): ${cleanData.length} chars received`);
       }
       
       // Check for our echo messages to confirm successful connection
@@ -255,6 +344,17 @@ export async function createTerminalSession(
           console.error(`[terminal.ts] Session error detected in stdout: ${cleanData}`);
           session.emit('error', new Error(data));
         }
+        
+        // Send a welcome message and prompt to ensure terminal shows something
+        setTimeout(() => {
+          const welcomeMsg = '\r\n🎉 Terminal connected successfully!\r\n';
+          session.emit('data', welcomeMsg);
+          
+          // Send a command to refresh the prompt
+          setTimeout(() => {
+            session.write('\n'); // Send newline to trigger prompt
+          }, 500);
+        }, 1000);
       }
       
       session.emit('data', data);
@@ -269,7 +369,7 @@ export async function createTerminalSession(
       
       // Only log stderr if there's meaningful content after cleaning
       if (cleanData.length > 0) {
-        console.error(`[terminal.ts] stderr (${sessionId}):`, cleanData);
+        console.error(`[terminal.ts] stderr (${sessionId}): ${cleanData.length} chars`);
       }
       
       // Collect stderr for error reporting

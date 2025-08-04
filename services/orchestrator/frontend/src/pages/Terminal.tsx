@@ -271,6 +271,7 @@ export function Terminal() {
       ws.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data);
+          console.log('[Terminal] WebSocket message received:', data.type, data.data?.length || 0, 'chars');
           
           if (data.type === 'output') {
             // Write data directly to terminal - let xterm handle ANSI sequences

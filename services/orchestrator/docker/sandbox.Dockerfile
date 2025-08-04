@@ -51,7 +51,7 @@ RUN nvim --version | head -n 1 && \
 RUN pip3 install --break-system-packages pynvim
 
 # Install Claude Code CLI
-RUN npm install -g @anthropic-ai/claude-code
+RUN curl -fsSL claude.ai/install.sh | bash
 
 # Set up a workspace directory
 WORKDIR /workspace

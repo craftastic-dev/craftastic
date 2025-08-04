@@ -70,7 +70,9 @@ export const terminalRoutes: FastifyPluginAsync = async (server) => {
         sessionType: sessionWithEnv.session_type,
         agentId: sessionWithEnv.agent_id,
         workingDirectory: sessionWithEnv.working_directory,
-        tmuxSessionName: sessionWithEnv.tmux_session_name
+        tmuxSessionName: sessionWithEnv.tmux_session_name,
+        status: sessionWithEnv.status,
+        name: sessionWithEnv.name
       });
       
       // Verify the user owns this environment
@@ -93,9 +95,11 @@ export const terminalRoutes: FastifyPluginAsync = async (server) => {
         return;
       }
       
+      // Get Docker instance for debugging
+      const docker = getDocker();
+      
       // Verify container is actually running before attempting to create session
       try {
-        const docker = getDocker();
         const container = docker.getContainer(containerId);
         const containerInfo = await container.inspect();
         
@@ -110,19 +114,7 @@ export const terminalRoutes: FastifyPluginAsync = async (server) => {
         return;
       }
       
-      // Verify the session's tmux session still exists
-      const sessionExists = await verifySessionExists(sessionId);
-      if (!sessionExists && sessionWithEnv.status !== 'dead') {
-        console.log(`[Terminal WebSocket] Session ${sessionId} tmux session no longer exists, marking as dead`);
-        await db
-          .updateTable('sessions')
-          .set({ 
-            status: 'dead',
-            updated_at: new Date()
-          })
-          .where('id', '=', sessionId)
-          .execute();
-      }
+      console.log(`[Terminal WebSocket] Creating terminal session for ${sessionWithEnv.name} (${sessionId})`);
 
       // Handle agent sessions differently
       if (sessionWithEnv.session_type === 'agent') {
@@ -198,7 +190,9 @@ export const terminalRoutes: FastifyPluginAsync = async (server) => {
         return;
       }
 
-      // Regular session
+      // Regular terminal session
+      console.log(`[Terminal WebSocket] Creating regular terminal session...`);
+      
       let terminal;
       try {
         terminal = await createTerminalSession(
@@ -207,6 +201,7 @@ export const terminalRoutes: FastifyPluginAsync = async (server) => {
           sessionWithEnv.tmux_session_name,
           sessionWithEnv.working_directory
         );
+        console.log(`[Terminal WebSocket] Terminal session created successfully`);
       } catch (error) {
         console.error(`[Terminal WebSocket] Failed to create terminal session:`, error);
         const errorMessage = error instanceof Error ? error.message : 'Unknown error creating terminal session';
@@ -239,6 +234,23 @@ export const terminalRoutes: FastifyPluginAsync = async (server) => {
         return;
       }
 
+      // Update session status to active after successful terminal creation
+      try {
+        await db
+          .updateTable('sessions')
+          .set({ 
+            status: 'active',
+            last_activity: new Date(),
+            updated_at: new Date()
+          })
+          .where('id', '=', sessionId)
+          .execute();
+        console.log(`[Terminal WebSocket] Updated session ${sessionId} status to 'active'`);
+      } catch (dbError) {
+        console.error(`[Terminal WebSocket] Failed to update session status to active:`, dbError);
+      }
+
+      // Set up terminal event handlers
       terminal.on('data', (data: string) => {
         connection.socket.send(JSON.stringify({
           type: 'output',
@@ -260,7 +272,6 @@ export const terminalRoutes: FastifyPluginAsync = async (server) => {
       });
       
       // Send initial resize to ensure proper terminal size
-      console.log('[routes/terminal.ts] Sending initial resize request to client');
       connection.socket.send(JSON.stringify({
         type: 'request-resize'
       }));
@@ -282,9 +293,26 @@ export const terminalRoutes: FastifyPluginAsync = async (server) => {
         }
       });
 
-      connection.socket.on('close', () => {
+      connection.socket.on('close', async () => {
+        console.log(`[Terminal WebSocket] Connection closed for session ${sessionId}`);
+        
         if (terminal && typeof terminal.destroy === 'function') {
           terminal.destroy();
+        }
+        
+        // Update session status to inactive after WebSocket closes
+        try {
+          await db
+            .updateTable('sessions')
+            .set({ 
+              status: 'inactive',
+              updated_at: new Date()
+            })
+            .where('id', '=', sessionId)
+            .execute();
+          console.log(`[Terminal WebSocket] Updated session ${sessionId} status to 'inactive'`);
+        } catch (dbError) {
+          console.error(`[Terminal WebSocket] Failed to update session status to inactive:`, dbError);
         }
       });
 

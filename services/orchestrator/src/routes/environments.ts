@@ -309,9 +309,16 @@ export async function environmentRoutes(fastify: FastifyInstance) {
         return;
       }
 
-      // Delete Docker container if it exists
+      // Clean up all sessions before deleting container
       if (environment.container_id) {
         try {
+          // Import cleanup service
+          const { cleanupEnvironmentSessions } = await import('../services/session-cleanup');
+          
+          // Clean up all tmux sessions for this environment
+          await cleanupEnvironmentSessions(environment.id, environment.container_id);
+          
+          // Delete Docker container
           await destroySandbox(environment.container_id);
         } catch (error) {
           console.warn('Failed to delete container:', error);
