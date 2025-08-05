@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Plus, Terminal, Trash2, ArrowLeft, GitBranch, Folder, Clock, Play, Square, Settings, Bot, Grid3X3, List, User, Github, Check, X, AlertCircle } from 'lucide-react';
+import { Plus, Terminal, Trash2, ArrowLeft, GitBranch, Folder, Clock, Play, Square, Settings, Bot, Grid3X3, List, User, Github, Check, X, AlertCircle, Loader2 } from 'lucide-react';
 import { api } from '../api/client';
 import type { Environment as EnvironmentType, Session } from '../api/client';
 import { Button } from '../components/ui/button';
@@ -126,13 +126,70 @@ export function Environment() {
 
   const deleteSessionMutation = useMutation({
     mutationFn: (sessionId: string) => api.deleteSession(sessionId),
-    onSuccess: () => {
+    onMutate: async (sessionId) => {
+      // Mark session as being deleted
+      setDeletingSessionIds(prev => new Set(prev).add(sessionId));
+      
+      // Cancel any outgoing refetches to prevent overwriting our optimistic update
+      await queryClient.cancelQueries({ queryKey: ['sessions', environmentId] });
+      
+      // Snapshot the previous value
+      const previousSessions = queryClient.getQueryData(['sessions', environmentId]);
+      
+      // Optimistically update by removing the session
+      queryClient.setQueryData(['sessions', environmentId], (old: any) => {
+        if (!old) return old;
+        return {
+          ...old,
+          sessions: old.sessions.filter((s: Session) => s.id !== sessionId)
+        };
+      });
+      
+      // Return a context object with the snapshotted value
+      return { previousSessions, sessionId };
+    },
+    onError: (err, sessionId, context) => {
+      // Remove from deleting set
+      setDeletingSessionIds(prev => {
+        const next = new Set(prev);
+        next.delete(sessionId);
+        return next;
+      });
+      
+      // If the mutation fails, use the context returned from onMutate to roll back
+      if (context?.previousSessions) {
+        queryClient.setQueryData(['sessions', environmentId], context.previousSessions);
+      }
+      toast({
+        title: "Failed to delete session",
+        description: err instanceof Error ? err.message : "An error occurred while deleting the session",
+        variant: "destructive",
+      });
+    },
+    onSuccess: (_, sessionId) => {
+      // Remove from deleting set
+      setDeletingSessionIds(prev => {
+        const next = new Set(prev);
+        next.delete(sessionId);
+        return next;
+      });
+      
+      toast({
+        title: "Session deleted",
+        description: "The session has been successfully removed",
+      });
+    },
+    onSettled: () => {
+      // Always refetch after error or success
       queryClient.invalidateQueries({ queryKey: ['sessions', environmentId] });
+      // Force immediate refetch to ensure UI updates
+      queryClient.refetchQueries({ queryKey: ['sessions', environmentId] });
     },
   });
 
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('list');
+  const [deletingSessionIds, setDeletingSessionIds] = useState<Set<string>>(new Set());
 
   const handleCreateSession = (data: {
     name?: string;
@@ -429,8 +486,8 @@ export function Environment() {
                 {sessions.map((session, index) => (
                   <div 
                     key={session.id} 
-                    className={`flex items-center justify-between p-4 hover:bg-accent/50 transition-colors cursor-pointer ${index !== sessions.length - 1 ? 'border-b' : ''}`}
-                    onClick={() => navigate(`/terminal/${session.id}?environmentId=${environmentId}`)}
+                    className={`relative flex items-center justify-between p-4 hover:bg-accent/50 transition-colors cursor-pointer ${index !== sessions.length - 1 ? 'border-b' : ''} ${deletingSessionIds.has(session.id) ? 'opacity-50' : ''}`}
+                    onClick={() => !deletingSessionIds.has(session.id) && navigate(`/terminal/${session.id}?environmentId=${environmentId}`)}
                   >
                     <div className="flex items-center gap-4 flex-1 min-w-0">
                       <div className="flex items-center gap-2">
@@ -488,8 +545,16 @@ export function Environment() {
                             <Square className="mr-2 h-4 w-4" />
                             Stop Session
                           </DropdownMenuItem>
-                          <DropdownMenuItem onClick={() => deleteSessionMutation.mutate(session.id)} className="text-red-600">
-                            <Trash2 className="mr-2 h-4 w-4" />
+                          <DropdownMenuItem 
+                            onClick={() => deleteSessionMutation.mutate(session.id)} 
+                            className="text-red-600"
+                            disabled={deletingSessionIds.has(session.id)}
+                          >
+                            {deletingSessionIds.has(session.id) ? (
+                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            ) : (
+                              <Trash2 className="mr-2 h-4 w-4" />
+                            )}
                             Delete Session
                           </DropdownMenuItem>
                         </DropdownMenuContent>
@@ -503,7 +568,13 @@ export function Environment() {
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {sessions.map((session) => (
-            <Card key={session.id} className="relative">
+            <Card key={session.id} className={`relative ${deletingSessionIds.has(session.id) ? 'opacity-50' : ''}`}>
+              {/* Show loading overlay when deleting */}
+              {deletingSessionIds.has(session.id) && (
+                <div className="absolute inset-0 flex items-center justify-center bg-background/80 z-10 rounded-lg">
+                  <Loader2 className="h-6 w-6 animate-spin" />
+                </div>
+              )}
               <CardHeader>
                 <CardTitle className="flex items-center gap-2 text-lg">
                   {getSessionTypeIcon(session.sessionType || 'terminal', session.agentId)}
@@ -566,8 +637,16 @@ export function Environment() {
                          <Square className="mr-2 h-4 w-4" />
                          Stop Session
                        </DropdownMenuItem>
-                      <DropdownMenuItem onClick={() => deleteSessionMutation.mutate(session.id)} className="text-red-600">
-                        <Trash2 className="mr-2 h-4 w-4" />
+                      <DropdownMenuItem 
+                        onClick={() => deleteSessionMutation.mutate(session.id)} 
+                        className="text-red-600"
+                        disabled={deletingSessionIds.has(session.id)}
+                      >
+                        {deletingSessionIds.has(session.id) ? (
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        ) : (
+                          <Trash2 className="mr-2 h-4 w-4" />
+                        )}
                         Delete Session
                       </DropdownMenuItem>
                     </DropdownMenuContent>

@@ -523,7 +523,10 @@ export const sessionRoutes: FastifyPluginAsync = async (server) => {
         .executeTakeFirst();
 
       if (!session) {
-        reply.code(404).send({ error: 'Session not found' });
+        reply.code(404).send({ 
+          error: 'Session not found',
+          details: 'The session may have already been deleted or does not exist'
+        });
         return;
       }
 
@@ -541,8 +544,8 @@ export const sessionRoutes: FastifyPluginAsync = async (server) => {
         }
       }
 
-      // Clean up worktree if exists
-      if (session.worktree_path) {
+      // Clean up worktree if exists (check both worktree_path and git_branch)
+      if (session.worktree_path || session.git_branch) {
         try {
           await worktreeService.removeWorktree(session.environment_id, sessionId);
           console.log(`🧹 Cleaned up worktree for session ${sessionId}`);
@@ -558,10 +561,14 @@ export const sessionRoutes: FastifyPluginAsync = async (server) => {
         .where('id', '=', sessionId)
         .execute();
 
-      reply.send({ success: true });
+      reply.send({ success: true, message: 'Session deleted successfully' });
     } catch (error) {
       console.error('Error deleting session:', error);
-      reply.code(500).send({ error: 'Failed to delete session' });
+      const errorMessage = error instanceof Error ? error.message : 'Failed to delete session';
+      reply.code(500).send({ 
+        error: 'Failed to delete session',
+        details: errorMessage
+      });
     }
   });
 };
