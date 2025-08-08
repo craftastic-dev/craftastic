@@ -22,6 +22,7 @@ export async function setupViteDev(server: FastifyInstance) {
       alias: {
         '@': join(frontendRoot, 'src'),
       },
+      extensions: ['.mjs', '.js', '.ts', '.jsx', '.tsx', '.json'],
     },
     optimizeDeps: {
       // Force Vite to look in the frontend directory for dependencies

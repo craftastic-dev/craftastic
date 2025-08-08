@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { GitCommit, Upload, FileText, RefreshCw, GitBranch, History, AlertCircle, Github, CheckCircle, X } from 'lucide-react';
-import { api } from '../api/client';
+import { api } from '../api/client.ts';
 import { Button } from './ui/button';
 import { ScrollArea } from './ui/scroll-area';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';

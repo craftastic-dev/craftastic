@@ -2,8 +2,8 @@ import { useState, useEffect, Fragment, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, Link } from 'react-router-dom';
 import { Code, GitBranch, GitFork, Play, Plus, Power, Settings, X, Grid3X3, List } from "lucide-react"
-import { api } from '../api/client';
-import type { Environment } from '../api/client';
+import { api } from '../api/client.ts';
+import type { Environment } from '../api/client.ts';
 import { useCreateEnvironment } from '../components/AppSidebar';
 import { CreateEnvironmentDialog } from '../components/CreateEnvironmentDialog';
 import { useAuth } from '../contexts/AuthContext';

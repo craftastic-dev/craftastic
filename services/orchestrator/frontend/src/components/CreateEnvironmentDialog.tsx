@@ -17,7 +17,7 @@ import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useGitHub } from '../contexts/GitHubContext';
 import { useQuery } from '@tanstack/react-query';
-import { api } from '../api/client';
+import { api } from '../api/client.ts';
 import { useAuth } from '../contexts/AuthContext';
 
 interface CreateEnvironmentDialogProps {

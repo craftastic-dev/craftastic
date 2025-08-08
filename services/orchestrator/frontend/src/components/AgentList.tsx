@@ -10,7 +10,7 @@ import { Label } from './ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { Textarea } from './ui/textarea';
 import { Separator } from './ui/separator';
-import { api, Agent, AgentCredential } from '../api/client';
+import { api, Agent, AgentCredential } from '../api/client.ts';
 import { toast } from './ui/use-toast';
 
 interface AgentListProps {

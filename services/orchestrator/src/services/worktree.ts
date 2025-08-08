@@ -29,7 +29,7 @@ export class WorktreeService {
     
     const repoPath = path.join(this.dataDir, 'repos', environmentId);
     // Use branch name for worktree path instead of session ID
-    const worktreePath = path.join(repoPath, 'worktrees', branch);
+    const worktreePath = path.join(this.dataDir, 'worktrees', environmentId, branch);
 
     try {
       // Ensure the repo exists (clone if first time)
@@ -77,7 +77,7 @@ export class WorktreeService {
 
     } catch (error) {
       console.error(`❌ Failed to create worktree for session ${sessionId}:`, error);
-      throw new Error(`Failed to create worktree: ${error.message}`);
+      throw new Error(`Failed to create worktree: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -96,7 +96,7 @@ export class WorktreeService {
         .executeTakeFirst();
 
       if (session?.git_branch) {
-        const worktreePath = path.join(repoPath, 'worktrees', session.git_branch);
+        const worktreePath = path.join(this.dataDir, 'worktrees', environmentId, session.git_branch);
         
         // Check if worktree exists for this branch
         if (await this.worktreeExists(repoPath, session.git_branch)) {
@@ -112,7 +112,7 @@ export class WorktreeService {
 
           if (!otherSessions) {
             // Remove the worktree since no other sessions use this branch
-            await execPromise(`git -C "${repoPath}" worktree remove --force "worktrees/${session.git_branch}"`);
+            await execPromise(`git -C "${repoPath}" worktree remove --force "${worktreePath}"`);
             console.log(`✅ Removed worktree for branch ${session.git_branch} (session ${sessionId})`);
           } else {
             console.log(`⚠️  Keeping worktree for branch ${session.git_branch} as other sessions still use it`);
@@ -164,7 +164,8 @@ export class WorktreeService {
         } else if (line === '' && currentWorktree.path) {
           // End of worktree info
           const pathBasename = path.basename(currentWorktree.path);
-          if (pathBasename !== environmentId && currentWorktree.path.includes('/worktrees/')) {
+          // Check if this is a worktree (not the bare repo itself)
+          if (!currentWorktree.path.endsWith(`/repos/${environmentId}`)) {
             // Find sessions using this branch
             const sessions = await getDatabase()
               .selectFrom('sessions')
@@ -204,7 +205,8 @@ export class WorktreeService {
         if (worktree.sessions.length === 0) {
           console.log(`🧹 Cleaning up orphaned worktree for branch ${worktree.branch}`);
           try {
-            await execPromise(`git -C "${repoPath}" worktree remove --force "worktrees/${worktree.branch}"`);
+            const worktreePath = path.join(this.dataDir, 'worktrees', environmentId, worktree.branch);
+            await execPromise(`git -C "${repoPath}" worktree remove --force "${worktreePath}"`);
             console.log(`✅ Removed orphaned worktree for branch ${worktree.branch}`);
           } catch (error) {
             console.error(`❌ Failed to remove orphaned worktree for branch ${worktree.branch}:`, error);
@@ -310,10 +312,9 @@ export class WorktreeService {
   }
 
   private async createGitWorktree(repoPath: string, worktreePath: string, branch: string, containerId?: string): Promise<void> {
-    // Ensure only the parent worktrees directory exists, not the branch directory itself
+    // Ensure only the parent directory exists, not the branch directory itself
     // git worktree add will create the branch directory with proper .git file
-    const worktreesParentDir = path.dirname(path.dirname(worktreePath)); // Get parent of worktrees dir
-    await fs.mkdir(path.join(worktreesParentDir, 'worktrees'), { recursive: true });
+    await fs.mkdir(path.dirname(worktreePath), { recursive: true });
 
     // Convert paths for container if needed
     const containerRepoPath = containerId ? repoPath.replace(this.dataDir, '/data') : repoPath;
@@ -388,7 +389,10 @@ export class WorktreeService {
   private async worktreeExists(repoPath: string, branchOrSessionId: string): Promise<boolean> {
     try {
       const { stdout } = await execPromise(`git -C "${repoPath}" worktree list --porcelain`);
-      return stdout.includes(`worktrees/${branchOrSessionId}`);
+      // Check if any worktree path contains this environment and branch
+      const environmentId = path.basename(repoPath);
+      const expectedPath = `/worktrees/${environmentId}/${branchOrSessionId}`;
+      return stdout.includes(expectedPath);
     } catch {
       return false;
     }
@@ -417,6 +421,65 @@ export class WorktreeService {
       return null;
     } catch {
       return null;
+    }
+  }
+
+  /**
+   * Clean up legacy worktrees that were created in the old location
+   */
+  async cleanupLegacyWorktrees(): Promise<void> {
+    try {
+      console.log('🔍 Checking for legacy worktree structures...');
+      
+      // Get all environments with git repositories
+      const db = getDatabase();
+      const environments = await db
+        .selectFrom('environments')
+        .select(['id', 'git_clone_path'])
+        .where('git_clone_path', 'is not', null)
+        .execute();
+      
+      for (const env of environments) {
+        const oldWorktreePath = path.join(this.dataDir, 'repos', env.id, 'worktrees');
+        
+        // Check if old structure exists
+        try {
+          await fs.access(oldWorktreePath);
+          console.log(`⚠️  Found legacy worktrees for environment ${env.id}`);
+          
+          // First, prune git's references to broken worktrees
+          try {
+            const repoPath = path.join(this.dataDir, 'repos', env.id);
+            await execPromise(`git -C "${repoPath}" worktree prune`);
+            console.log(`✅ Pruned git worktree references for ${env.id}`);
+          } catch (e) {
+            console.warn(`⚠️  Failed to prune worktrees for ${env.id}:`, e);
+          }
+          
+          // Remove the old worktree directories
+          await fs.rm(oldWorktreePath, { recursive: true, force: true });
+          console.log(`✅ Removed legacy worktree directory for ${env.id}`);
+          
+          // Clear worktree paths from sessions
+          await db
+            .updateTable('sessions')
+            .set({ 
+              worktree_path: null,
+              git_branch: null,
+              updated_at: new Date()
+            })
+            .where('environment_id', '=', env.id)
+            .execute();
+          console.log(`✅ Cleared session worktree paths for ${env.id}`);
+          
+        } catch (e) {
+          // Directory doesn't exist, nothing to clean up
+        }
+      }
+      
+      console.log('✅ Legacy worktree cleanup complete');
+    } catch (error) {
+      console.error('❌ Error during legacy worktree cleanup:', error);
     }
   }
 

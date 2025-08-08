@@ -4,11 +4,11 @@ import { useQuery } from '@tanstack/react-query';
 import { Terminal as XTerm } from 'xterm';
 import { FitAddon } from 'xterm-addon-fit';
 import { WebLinksAddon } from 'xterm-addon-web-links';
-import { Maximize2, Minimize2, ArrowLeft, FileText, PanelRightOpen, PanelRightClose } from 'lucide-react';
+import { Maximize2, Minimize2, ArrowLeft, FileText, PanelRightOpen, PanelRightClose, Trash2 } from 'lucide-react';
 import 'xterm/css/xterm.css';
 import { Button } from '../components/ui/button';
 import { GitPanel } from '../components/GitPanel';
-import { api, ensureValidToken } from '../api/client';
+import * as client from '../api/client.ts';
 
 export function Terminal() {
   const { sessionId } = useParams<{ sessionId: string }>();
@@ -25,11 +25,12 @@ export function Terminal() {
   
   const [isExpanded, setIsExpanded] = useState(false);
   const [showGitPanel, setShowGitPanel] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   // Fetch session data to get the name
   const { data: sessionData } = useQuery({
     queryKey: ['session', sessionId],
-    queryFn: () => api.getSession(sessionId!),
+    queryFn: () => client.api.getSession(sessionId!),
     enabled: !!sessionId,
   });
 
@@ -195,7 +196,7 @@ export function Terminal() {
 
       // Check and refresh token if needed
       console.log('[Terminal.tsx] Checking token validity before WebSocket connection...');
-      const tokenValid = await ensureValidToken();
+      const tokenValid = await client.ensureValidToken();
       if (!tokenValid) {
         console.error('[Terminal.tsx] Failed to ensure valid token');
         term.write('\r\n[Error] Authentication failed. Please log in again.\r\n');
@@ -312,7 +313,7 @@ export function Terminal() {
           term.write('\r\n[Authentication failed, refreshing token...]\r\n');
           
           // Try to refresh token and reconnect
-          const tokenValid = await ensureValidToken();
+          const tokenValid = await client.ensureValidToken();
           if (tokenValid) {
             console.log('[Terminal.tsx] Token refreshed successfully, reconnecting...');
             term.write('[Reconnecting...]\r\n');
@@ -565,6 +566,29 @@ export function Terminal() {
             </h2>
           </div>
           <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={!sessionId || !environmentId || isDeleting}
+              onClick={async () => {
+                if (!sessionId || !environmentId) return;
+                const confirmed = window.confirm('Delete this session? This cannot be undone.');
+                if (!confirmed) return;
+                try {
+                  setIsDeleting(true);
+                  await client.api.deleteSession(sessionId);
+                  navigate(`/environment/${environmentId}`);
+                } catch (error: any) {
+                  alert(error?.message || 'Failed to delete session');
+                } finally {
+                  setIsDeleting(false);
+                }
+              }}
+              className="text-red-500 border-red-500 hover:bg-red-50 dark:hover:bg-red-900/20"
+            >
+              <Trash2 className="h-4 w-4 mr-2" />
+              {isDeleting ? 'Deleting…' : 'Delete'}
+            </Button>
             <Button
               variant="outline"
               size="sm"

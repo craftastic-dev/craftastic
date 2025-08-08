@@ -5,7 +5,7 @@ import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { Link } from 'react-router-dom';
 import { CheckCircle2, AlertCircle, Clock } from 'lucide-react';
-import { api } from '../api/client';
+import { api } from '../api/client.ts';
 
 interface Agent {
   id: string;

@@ -2,7 +2,7 @@ import { Link } from "react-router-dom"
 import { Folder, Settings, Container, Bot, GitBranch, ChevronRight, ChevronDown, Terminal } from "lucide-react"
 import { useState, createContext, useContext, useEffect } from "react"
 import { useQuery } from '@tanstack/react-query'
-import { api } from '../api/client'
+import { api } from '../api/client.ts'
 import { useAuth } from '../contexts/AuthContext'
 
 import { Sidebar, SidebarContent, SidebarFooter, SidebarGroup, SidebarGroupContent, SidebarGroupLabel, SidebarMenu, SidebarMenuButton, SidebarMenuItem } from "@/components/ui/sidebar"
