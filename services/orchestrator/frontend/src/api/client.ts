@@ -138,7 +138,7 @@ export interface Agent {
   id: string;
   userId: string;
   name: string;
-  type: 'claude-code' | 'gemini-cli' | 'qwen-coder';
+  type: 'claude-code' | 'gemini-cli' | 'qwen-coder' | 'cursor-cli';
   createdAt: string;
   updatedAt: string;
   credential?: AgentCredential;
@@ -589,6 +589,7 @@ export const api = {
 
   // Agent management
   async createAgent(userId: string, name: string, type: 'claude-code' | 'gemini-cli' | 'qwen-coder', credential?: AgentCredential): Promise<Agent> {
+    // Note: Keep signature backward compatible for existing callers; 'cursor-cli' will be passed through at runtime
     const response = await fetch(`${API_BASE}/agents`, {
       method: 'POST',
       headers: getHeaders(),

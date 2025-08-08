@@ -26,6 +26,8 @@ interface CreateSessionDialogProps {
   agents: Agent[];
   isCreating: boolean;
   environmentId: string;
+  defaultBranch?: string;
+  defaultName?: string;
 }
 
 export function CreateSessionDialog({ 
@@ -34,7 +36,9 @@ export function CreateSessionDialog({
   onCreateSession, 
   agents,
   isCreating,
-  environmentId
+  environmentId,
+  defaultBranch,
+  defaultName,
 }: CreateSessionDialogProps) {
   const [sessionName, setSessionName] = useState('');
   const [branch, setBranch] = useState('');
@@ -125,9 +129,20 @@ export function CreateSessionDialog({
     return () => clearTimeout(timeoutId);
   }, [branch, checkBranchAvailability]);
 
-  // Reset state when dialog closes
+  // Reset or initialize state when dialog opens/closes
   useEffect(() => {
-    if (!open) {
+    if (open) {
+      // Prefill defaults when opening
+      if (defaultBranch !== undefined) {
+        setBranch(defaultBranch);
+        if (!sessionName) {
+          setSessionName(defaultBranch);
+        }
+      }
+      if (defaultName !== undefined) {
+        setSessionName(defaultName);
+      }
+    } else {
       setSessionName('');
       setBranch('');
       setWorkingDirectory('/workspace');
@@ -136,7 +151,7 @@ export function CreateSessionDialog({
       setNameValidation({ status: 'idle', message: '' });
       setBranchValidation({ status: 'idle', message: '' });
     }
-  }, [open]);
+  }, [open, defaultBranch, defaultName]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -197,8 +212,8 @@ export function CreateSessionDialog({
               onChange={(e) => setSessionType(e.target.value as 'terminal' | 'agent')}
               className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              <option value="terminal">🖥️ Session</option>
-              <option value="agent">🤖 Agent Session</option>
+              <option value="terminal">🖥️ Terminal</option>
+              <option value="agent">🤖 Agent</option>
             </select>
           </div>
 

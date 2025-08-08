@@ -4,7 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Terminal as XTerm } from 'xterm';
 import { FitAddon } from 'xterm-addon-fit';
 import { WebLinksAddon } from 'xterm-addon-web-links';
-import { Maximize2, Minimize2, ArrowLeft, FileText, PanelRightOpen, PanelRightClose, Trash2 } from 'lucide-react';
+import { Maximize2, Minimize2, ArrowLeft, PanelRightOpen, PanelRightClose, Trash2 } from 'lucide-react';
 import 'xterm/css/xterm.css';
 import { Button } from '../components/ui/button';
 import { GitPanel } from '../components/GitPanel';
@@ -24,8 +24,19 @@ export function Terminal() {
   const preExpandDimensionsRef = useRef<{ cols: number; rows: number } | null>(null);
   
   const [isExpanded, setIsExpanded] = useState(false);
-  const [showGitPanel, setShowGitPanel] = useState(false);
+  const [showGitPanel, setShowGitPanel] = useState(() => {
+    const initial = new URLSearchParams(window.location.search).get('showGit');
+    return initial === '1' || initial === 'true';
+  });
   const [isDeleting, setIsDeleting] = useState(false);
+
+  // React to query param changes for showGit
+  useEffect(() => {
+    const showParam = searchParams.get('showGit');
+    if (showParam) {
+      setShowGitPanel(showParam === '1' || showParam === 'true');
+    }
+  }, [searchParams]);
 
   // Fetch session data to get the name
   const { data: sessionData } = useQuery({
@@ -482,11 +493,9 @@ export function Terminal() {
           
           try {
             // Restore original dimensions if available
-            if (preExpandDimensionsRef.current?.cols > 0 && preExpandDimensionsRef.current?.rows > 0) {
-              xtermRef.current.resize(
-                preExpandDimensionsRef.current.cols, 
-                preExpandDimensionsRef.current.rows
-              );
+            const dims = preExpandDimensionsRef.current;
+            if (dims && dims.cols > 0 && dims.rows > 0) {
+              xtermRef.current.resize(dims.cols, dims.rows);
               
               // Fine-tune with fit addon
               setTimeout(() => {

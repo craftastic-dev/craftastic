@@ -7,7 +7,7 @@ import { encryptCredentials, decryptCredentials } from '../lib/encryption.js';
 const CreateAgentSchema = z.object({
   userId: z.string().min(1),
   name: z.string().min(1).max(255),
-  type: z.enum(['claude-code', 'gemini-cli', 'qwen-coder']),
+  type: z.enum(['claude-code', 'gemini-cli', 'qwen-coder', 'cursor-cli']),
   credential: z.object({
     type: z.string().min(1), // oauth, anthropic_api_key, etc.
     value: z.string().min(1) // credential value

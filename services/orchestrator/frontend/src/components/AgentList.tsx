@@ -31,7 +31,7 @@ export function AgentList({ userId }: AgentListProps) {
 
   // Create agent mutation
   const createAgentMutation = useMutation({
-    mutationFn: (data: { name: string; type: 'claude-code' | 'gemini-cli' | 'qwen-coder'; credential?: AgentCredential }) =>
+    mutationFn: (data: { name: string; type: 'claude-code' | 'gemini-cli' | 'qwen-coder' | 'cursor-cli'; credential?: AgentCredential }) =>
       api.createAgent(userId, data.name, data.type, data.credential),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['agents', userId] });
@@ -75,7 +75,7 @@ export function AgentList({ userId }: AgentListProps) {
 
   const handleCreateAgent = (formData: FormData) => {
     const name = formData.get('name') as string;
-    const type = formData.get('type') as 'claude-code' | 'gemini-cli' | 'qwen-coder';
+    const type = formData.get('type') as 'claude-code' | 'gemini-cli' | 'qwen-coder' | 'cursor-cli';
     const credentialType = formData.get('credentialType') as string;
     const credentialValue = formData.get('credentialValue') as string;
 
@@ -114,6 +114,7 @@ export function AgentList({ userId }: AgentListProps) {
       case 'claude-code': return '🤖';
       case 'gemini-cli': return '💎';
       case 'qwen-coder': return '🧠';
+      case 'cursor-cli': return '🖱️';
       default: return '🔧';
     }
   };
@@ -178,6 +179,7 @@ export function AgentList({ userId }: AgentListProps) {
                     <SelectItem value="claude-code">🤖 Claude Code</SelectItem>
                     <SelectItem value="gemini-cli">💎 Gemini CLI</SelectItem>
                     <SelectItem value="qwen-coder">🧠 Qwen Coder</SelectItem>
+                    <SelectItem value="cursor-cli">🖱️ Cursor CLI</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
