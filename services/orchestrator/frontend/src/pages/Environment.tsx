@@ -480,13 +480,6 @@ export function Environment() {
             </Breadcrumb>
           </div>
           <div className="flex items-center gap-2">
-            {environment.repositoryUrl && (
-              <Button variant="outline" size="sm" asChild>
-                <a href={getGitHubWebUrl(environment.repositoryUrl)} target="_blank" rel="noreferrer">
-                  <ExternalLink className="h-4 w-4 mr-2" /> Open Repo
-                </a>
-              </Button>
-            )}
             <Button onClick={() => { setCreateDefaults({}); setShowCreateDialog(true); }}>
               <Plus className="h-4 w-4 mr-2" />
               New Session
@@ -638,10 +631,6 @@ export function Environment() {
               Grid
             </Button>
           </div>
-          <Button onClick={() => { setCreateDefaults({}); setShowCreateDialog(true); }}>
-            <Plus className="h-4 w-4 mr-2" />
-            New Session
-          </Button>
         </div>
       </div>
 
