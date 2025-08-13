@@ -184,6 +184,8 @@ export function Environment() {
     onSettled: () => {
       // Always refetch after error or success
       queryClient.invalidateQueries({ queryKey: ['sessions', environmentId] });
+      // Invalidate sidebar sessions to update the sidebar immediately
+      queryClient.invalidateQueries({ queryKey: ['sidebar-sessions'] });
       // Force immediate refetch to ensure UI updates
       queryClient.refetchQueries({ queryKey: ['sessions', environmentId] });
     },

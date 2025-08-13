@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useLayoutEffect } from 'react';
 import { useParams, useSearchParams, useNavigate } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Terminal as XTerm } from 'xterm';
 import { FitAddon } from 'xterm-addon-fit';
 import { WebLinksAddon } from 'xterm-addon-web-links';
@@ -14,6 +14,7 @@ export function Terminal() {
   const { sessionId } = useParams<{ sessionId: string }>();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const environmentId = searchParams.get('environmentId');
   
   const terminalRef = useRef<HTMLDivElement>(null);
@@ -586,6 +587,8 @@ export function Terminal() {
                 try {
                   setIsDeleting(true);
                   await client.api.deleteSession(sessionId);
+                  // Invalidate sidebar sessions to update the sidebar immediately
+                  queryClient.invalidateQueries({ queryKey: ['sidebar-sessions'] });
                   navigate(`/environment/${environmentId}`);
                 } catch (error: any) {
                   alert(error?.message || 'Failed to delete session');
