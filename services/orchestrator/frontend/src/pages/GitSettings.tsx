@@ -14,17 +14,9 @@ import { useState, useEffect } from 'react';
 import { useToast } from '@/components/ui/use-toast';
 
 export function GitSettings() {
-  const { isConnected, username, isLoading, connect, disconnect, verificationUri, userCode, enablePolling, disablePolling } = useGitHub();
+  const { isConnected, username, isLoading, connect, disconnect, verificationUri, userCode, refreshStatus } = useGitHub();
   const [showAuthDialog, setShowAuthDialog] = useState(false);
   const { toast } = useToast();
-
-  // Enable GitHub polling when this page is mounted
-  useEffect(() => {
-    enablePolling();
-    return () => {
-      disablePolling();
-    };
-  }, [enablePolling, disablePolling]);
 
   const handleConnect = () => {
     connect();
@@ -103,7 +95,16 @@ export function GitSettings() {
                     </div>
                   )}
                 </div>
-                <div>
+                <div className="flex items-center gap-2">
+                  {isConnected && (
+                    <Button variant="outline" size="sm" onClick={refreshStatus} disabled={isLoading}>
+                      {isLoading ? (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      ) : (
+                        'Refresh'
+                      )}
+                    </Button>
+                  )}
                   {isLoading ? (
                     <Button disabled size="sm">
                       <Loader2 className="mr-2 h-4 w-4 animate-spin" />

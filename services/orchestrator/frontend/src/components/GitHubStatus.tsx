@@ -19,7 +19,7 @@ import { useState } from 'react';
 import { useToast } from '@/components/ui/use-toast';
 
 export function GitHubStatus() {
-  const { isConnected, username, isLoading, connect, disconnect, verificationUri, userCode, isPolling } = useGitHub();
+  const { isConnected, username, isLoading, connect, disconnect, verificationUri, userCode } = useGitHub();
   const [showAuthDialog, setShowAuthDialog] = useState(false);
   const { toast } = useToast();
 
@@ -142,7 +142,7 @@ export function GitHubStatus() {
                 </Button>
               </div>
             </div>
-            {isPolling && (
+            {userCode && (
               <div className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
                 <Loader2 className="h-4 w-4 animate-spin" />
                 Waiting for authorization...
