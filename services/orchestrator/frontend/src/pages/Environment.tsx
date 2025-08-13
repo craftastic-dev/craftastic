@@ -58,6 +58,7 @@ export function Environment() {
       api.createSession(environmentId!, name, branch, workingDirectory, sessionType, agentId),
     onSuccess: (session) => {
       queryClient.invalidateQueries({ queryKey: ['sessions', environmentId] });
+      queryClient.invalidateQueries({ queryKey: ['sidebar-sessions'] });
       setBranchConflictError(null);
       navigate(`/terminal/${session.id}?environmentId=${environmentId}`);
     },
