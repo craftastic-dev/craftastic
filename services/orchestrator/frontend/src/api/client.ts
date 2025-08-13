@@ -600,6 +600,25 @@ export const api = {
     return response.json();
   },
 
+  async startAgentSetup(agentId: string, environmentId: string): Promise<{ sessionId: string; containerHome: string }> {
+    const response = await fetch(`${API_BASE}/agents/${agentId}/setup/start`, {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify({ environmentId }),
+    });
+    if (!response.ok) throw new Error('Failed to start agent setup');
+    return response.json();
+  },
+
+  async ingestAgentCredentials(agentId: string, token?: string): Promise<void> {
+    const response = await fetch(`${API_BASE}/agents/${agentId}/setup/ingest`, {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify(token ? { token } : {}),
+    });
+    if (!response.ok) throw new Error('Failed to ingest agent credentials');
+  },
+
   async getUserAgents(userId: string): Promise<{ agents: Agent[] }> {
     const response = await fetch(`${API_BASE}/agents/user/${userId}`, {
       headers: getHeaders(false),

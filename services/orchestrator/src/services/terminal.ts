@@ -304,8 +304,14 @@ export async function createTerminalSession(
 
   session.resize = async (cols: number, rows: number) => {
     try {
+      if (!cols || !rows) return;
       console.log(`Resizing terminal to ${cols}x${rows}`);
-      await exec.resize({ h: rows, w: cols });
+      try {
+        await exec.resize({ h: rows, w: cols });
+      } catch (e) {
+        // Exec may have closed; ignore silently to prevent 404 spam
+        console.warn('Resize ignored (exec not found or closed)');
+      }
       // Don't send manual resize escape sequence - Docker exec API handles this
     } catch (error) {
       console.error('Failed to resize terminal:', error);
@@ -411,7 +417,7 @@ export async function createTerminalSession(
     } else {
       console.log('[terminal.ts] Session connected successfully within timeout');
     }
-  }, 5000);
+  }, 2000);
   
   // Clear timeout if we connect successfully
   session.once('data', () => {

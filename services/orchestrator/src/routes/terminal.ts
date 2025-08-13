@@ -1,8 +1,8 @@
 import { FastifyPluginAsync } from 'fastify';
-import { createTerminalSession, getTerminalSession } from '../services/terminal';
+import { createTerminalSession } from '../services/terminal';
 import { getDatabase } from '../lib/kysely';
-import { verifySessionExists } from '../services/session-cleanup';
-import { getDocker } from '../services/docker';
+// import { verifySessionExists } from '../services/session-cleanup';
+import { getDocker, ensureContainerRunning } from '../services/docker';
 
 export const terminalRoutes: FastifyPluginAsync = async (server) => {
   const db = getDatabase();
@@ -18,8 +18,8 @@ export const terminalRoutes: FastifyPluginAsync = async (server) => {
     try {
       if (token) {
         // Verify the JWT token
-        const decoded = await request.server.jwt.verify(token);
-        console.log('[routes/terminal.ts] WebSocket authenticated for user:', decoded.sub);
+        const decoded = await request.server.jwt.verify(token) as any;
+        console.log('[routes/terminal.ts] WebSocket authenticated for user:', decoded.sub || decoded.userId || 'unknown');
         // Store user info for later use if needed
         (request as any).user = decoded;
       } else {
@@ -95,29 +95,21 @@ export const terminalRoutes: FastifyPluginAsync = async (server) => {
         return;
       }
       
-      // Get Docker instance for debugging
-      const docker = getDocker();
-      
-      // Verify container is actually running before attempting to create session
+      // Ensure container is running (will start if stopped)
       try {
-        const container = docker.getContainer(containerId);
-        const containerInfo = await container.inspect();
-        
-        if (!containerInfo.State.Running) {
-          console.error(`[Terminal WebSocket] Container ${containerId} is not running`);
-          connection.socket.close(1008, 'Container is not running');
-          return;
-        }
+        await ensureContainerRunning(containerId);
       } catch (error) {
-        console.error(`[Terminal WebSocket] Failed to inspect container ${containerId}:`, error);
-        connection.socket.close(1008, 'Container not accessible');
+        console.error(`[Terminal WebSocket] Failed to ensure container running:`, error);
+        connection.socket.close(1008, 'Failed to start container');
         return;
       }
       
       console.log(`[Terminal WebSocket] Creating terminal session for ${sessionWithEnv.name} (${sessionId})`);
 
       // Handle agent sessions differently
-      if (sessionWithEnv.session_type === 'agent') {
+      const isAgentSession = sessionWithEnv.session_type === 'agent';
+      let agentBootstrap: string | null = null;
+      if (isAgentSession) {
         if (!sessionWithEnv.agent_id) {
           connection.socket.close(1008, 'Agent session requires agent ID');
           return;
@@ -135,59 +127,19 @@ export const terminalRoutes: FastifyPluginAsync = async (server) => {
           return;
         }
 
-        // For now, send a message that we're starting the agent
-        // TODO: Implement actual agent process startup
-        connection.socket.send(JSON.stringify({
-          type: 'output',
-          data: `\r\n🤖 Starting ${agent.name} (${agent.type}) agent...\r\n`
-        }));
+        // Determine if credentials exist
+        const cred = await db
+          .selectFrom('agent_credentials')
+          .select(['type'])
+          .where('agent_id', '=', sessionWithEnv.agent_id)
+          .executeTakeFirst();
 
-        connection.socket.send(JSON.stringify({
-          type: 'output',
-          data: `📋 Agent Session Details:\r\n`
-        }));
+        // Inject startup commands into tmux window after attach
+        const agentHome = `/data/agents/${sessionWithEnv.agent_id}/home`;
 
-        connection.socket.send(JSON.stringify({
-          type: 'output',
-          data: `   Name: ${agent.name}\r\n`
-        }));
-
-        connection.socket.send(JSON.stringify({
-          type: 'output',
-          data: `   Type: ${agent.type}\r\n`
-        }));
-
-        connection.socket.send(JSON.stringify({
-          type: 'output',
-          data: `   Working Directory: ${sessionWithEnv.working_directory}\r\n`
-        }));
-
-        connection.socket.send(JSON.stringify({
-          type: 'output',
-          data: `\r\n🚧 Agent process startup not yet implemented.\r\n`
-        }));
-
-        connection.socket.send(JSON.stringify({
-          type: 'output',
-          data: `💡 This will eventually start the actual agent process with loaded credentials.\r\n\r\n`
-        }));
-
-        // Keep connection alive for demonstration
-        connection.socket.on('message', (message: Buffer) => {
-          try {
-            const parsed = JSON.parse(message.toString());
-            if (parsed.type === 'input') {
-              connection.socket.send(JSON.stringify({
-                type: 'output',
-                data: `Agent received: ${parsed.data}`
-              }));
-            }
-          } catch (error) {
-            console.error('WebSocket message error:', error);
-          }
-        });
-
-        return;
+        agentBootstrap = cred
+          ? `export HOME=${agentHome}; cd ${sessionWithEnv.working_directory || '/workspace'}; claude\n`
+          : `export HOME=${agentHome}; mkdir -p "$HOME" "$HOME/.claude" "$HOME/.config/claude"; claude setup-token\n`;
       }
 
       // Regular terminal session
@@ -250,6 +202,24 @@ export const terminalRoutes: FastifyPluginAsync = async (server) => {
         console.error(`[Terminal WebSocket] Failed to update session status to active:`, dbError);
       }
 
+      // If this is an agent session, inject the bootstrap command now that tmux session exists
+      if (isAgentSession && agentBootstrap) {
+        try {
+          const docker2 = getDocker();
+          const container2 = docker2.getContainer(containerId);
+          const cmd = `/bin/bash -lc "tmux send-keys -t ${sessionWithEnv.tmux_session_name} \"${agentBootstrap.replace(/"/g, '\\"')}\" C-m"`;
+          const exec2 = await container2.exec({
+            Cmd: ['/bin/bash', '-lc', cmd],
+            AttachStdout: false,
+            AttachStderr: false,
+          });
+          await exec2.start({ Detach: true });
+          console.log('[Terminal WebSocket] Injected agent bootstrap command');
+        } catch (e) {
+          console.warn('Failed to inject agent bootstrap after attach:', e);
+        }
+      }
+
       // Set up terminal event handlers
       terminal.on('data', (data: string) => {
         connection.socket.send(JSON.stringify({
@@ -271,10 +241,8 @@ export const terminalRoutes: FastifyPluginAsync = async (server) => {
         connection.socket.close(1000, 'Terminal session ended');
       });
       
-      // Send initial resize to ensure proper terminal size
-      connection.socket.send(JSON.stringify({
-        type: 'request-resize'
-      }));
+      // Ask client for an initial resize and also try a conservative default write
+      connection.socket.send(JSON.stringify({ type: 'request-resize' }));
 
       connection.socket.on('message', (message: Buffer) => {
         try {

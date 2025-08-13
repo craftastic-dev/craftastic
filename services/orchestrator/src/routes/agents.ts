@@ -2,6 +2,9 @@ import { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import { getDatabase } from '../lib/kysely';
 import { encryptCredentials, decryptCredentials } from '../lib/encryption.js';
+import fs from 'fs/promises';
+import path from 'path';
+import os from 'os';
 
 // Validation schemas
 const CreateAgentSchema = z.object({
@@ -250,6 +253,147 @@ const agents: FastifyPluginAsync = async function (fastify) {
     } catch (error) {
       fastify.log.error('Error deleting agent:', error);
       reply.status(500).send({ error: 'Failed to delete agent' });
+    }
+  });
+
+  // ========== Agent Setup (Claude CLI) ==========
+  // Start setup: create an agent session and ensure agent HOME directory exists on host
+  fastify.post('/:agentId/setup/start', async function (request, reply) {
+    const { agentId } = request.params as { agentId: string };
+    const { environmentId } = request.body as { environmentId: string };
+    const db = getDatabase();
+
+    try {
+      // Verify agent exists
+      const agent = await db
+        .selectFrom('agents')
+        .select(['id', 'user_id'])
+        .where('id', '=', agentId)
+        .executeTakeFirst();
+      if (!agent) return reply.status(404).send({ error: 'Agent not found' });
+
+      // Verify environment exists and belongs to user
+      const env = await db
+        .selectFrom('environments')
+        .select(['id', 'user_id', 'container_id'])
+        .where('id', '=', environmentId)
+        .executeTakeFirst();
+      if (!env) return reply.status(404).send({ error: 'Environment not found' });
+      if (env.user_id !== agent.user_id) return reply.status(403).send({ error: 'Access denied' });
+      if (!env.container_id) {
+        return reply.status(400).send({
+          error: 'Environment not ready',
+          details: 'Environment does not have a Docker container. Build/start the sandbox image first.'
+        });
+      }
+
+      // Ensure host HOME path for this agent exists
+      const dataDir = process.env.CRAFTASTIC_DATA_DIR || path.join(os.homedir(), '.craftastic');
+      const hostHome = path.join(dataDir, 'agents', agentId, 'home');
+      await fs.mkdir(hostHome, { recursive: true });
+
+      // Create a minimal agent session for setup
+      const timestamp = Date.now();
+      const tmuxName = `agent-setup-${timestamp}`;
+      const session = await db
+        .insertInto('sessions')
+        .values({
+          environment_id: environmentId,
+          name: `setup-${agentId.slice(0, 8)}`,
+          tmux_session_name: tmuxName,
+          working_directory: '/workspace',
+          status: 'inactive',
+          session_type: 'agent',
+          agent_id: agentId,
+        })
+        .returningAll()
+        .executeTakeFirstOrThrow();
+
+      const containerHome = `/data/agents/${agentId}/home`;
+      reply.send({ sessionId: session.id, containerHome });
+    } catch (error: any) {
+      request.server.log.error('Failed to start agent setup:', error);
+      reply.status(500).send({ error: 'Failed to start agent setup', details: error?.message });
+    }
+  });
+
+  // Ingest credentials after setup: read ~/.claude.json from host, store in DB
+  fastify.post('/:agentId/setup/ingest', async function (request, reply) {
+    const { agentId } = request.params as { agentId: string };
+    const db = getDatabase();
+    try {
+      const body = (request.body as any) || {};
+      const agent = await db
+        .selectFrom('agents')
+        .select(['id'])
+        .where('id', '=', agentId)
+        .executeTakeFirst();
+      if (!agent) return reply.status(404).send({ error: 'Agent not found' });
+
+      // If a token is provided directly, store it and return
+      if (body.token && typeof body.token === 'string') {
+        await db.transaction().execute(async (trx) => {
+          await trx.deleteFrom('agent_credentials').where('agent_id', '=', agentId).execute();
+          await trx
+            .insertInto('agent_credentials')
+            .values({
+              agent_id: agentId,
+              type: 'claude_oauth_token',
+              encrypted_value: encryptCredentials(body.token),
+            })
+            .execute();
+        });
+        return reply.send({ success: true, mode: 'token' });
+      }
+
+      const dataDir = process.env.CRAFTASTIC_DATA_DIR || path.join(os.homedir(), '.craftastic');
+      const hostHome = path.join(dataDir, 'agents', agentId, 'home');
+      const candidates = [
+        path.join(hostHome, '.claude.json'),
+        path.join(hostHome, '.claude', 'settings.json'),
+        path.join(hostHome, '.config', 'claude', 'settings.json'),
+      ];
+
+      let jsonContent = '';
+      let usedPath: string | null = null;
+      for (const p of candidates) {
+        try {
+          jsonContent = await fs.readFile(p, 'utf8');
+          usedPath = p;
+          break;
+        } catch {}
+      }
+      if (!usedPath) {
+        return reply.status(400).send({ error: 'Credentials file not found', details: candidates });
+      }
+
+      // Validate JSON
+      try {
+        JSON.parse(jsonContent);
+      } catch {
+        return reply.status(400).send({ error: 'Invalid JSON in credentials file' });
+      }
+
+      // Upsert credential: one credential per agent
+      await db.transaction().execute(async (trx) => {
+        await trx
+          .deleteFrom('agent_credentials')
+          .where('agent_id', '=', agentId)
+          .execute();
+        await trx
+          .insertInto('agent_credentials')
+          .values({
+            agent_id: agentId,
+            type: 'claude_cli_json',
+            encrypted_value: encryptCredentials(jsonContent),
+          })
+          .execute();
+      });
+
+      reply.send({ success: true, mode: 'file', path: usedPath });
+    } catch (error: any) {
+      request.server.log.error('Failed to ingest agent credentials:', error);
+      reply.status(500).send({ error: 'Failed to ingest agent credentials', details: error?.message });
     }
   });
 

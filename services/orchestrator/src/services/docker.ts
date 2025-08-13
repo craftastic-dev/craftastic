@@ -120,6 +120,24 @@ export async function listSandboxes(userId?: string) {
   return containers;
 }
 
+export async function ensureContainerRunning(containerId: string): Promise<void> {
+  const container = docker.getContainer(containerId);
+  
+  try {
+    const info = await container.inspect();
+    if (!info.State.Running) {
+      console.log(`[Docker] Container ${containerId} not running, starting it...`);
+      await container.start();
+      // Wait a moment for container to be ready
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      console.log(`[Docker] Container ${containerId} started successfully`);
+    }
+  } catch (error) {
+    console.error(`[Docker] Failed to ensure container ${containerId} is running:`, error);
+    throw new Error(`Container not available: ${error instanceof Error ? error.message : 'Unknown error'}`);
+  }
+}
+
 export function getDocker() {
   return docker;
 }

@@ -12,6 +12,7 @@ import { Textarea } from './ui/textarea';
 import { Separator } from './ui/separator';
 import { api, Agent, AgentCredential } from '../api/client.ts';
 import { toast } from './ui/use-toast';
+import { InlineTerminal } from './InlineTerminal';
 
 interface AgentListProps {
   userId: string;
@@ -21,6 +22,10 @@ export function AgentList({ userId }: AgentListProps) {
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [editingAgent, setEditingAgent] = useState<Agent | null>(null);
   const [showCredential, setShowCredential] = useState<Record<string, boolean>>({});
+  const [setupAgent, setSetupAgent] = useState<Agent | null>(null);
+  const [setupEnvId, setSetupEnvId] = useState<string>('');
+  const [setupSessionId, setSetupSessionId] = useState<string>('');
+  const [detectedToken, setDetectedToken] = useState<string>('');
   const queryClient = useQueryClient();
 
   // Fetch user agents
@@ -72,6 +77,10 @@ export function AgentList({ userId }: AgentListProps) {
   // We don't need to fetch credentials for editing since we'll ask user to enter new ones
 
   const agents = agentsData?.agents || [];
+  const { data: envs } = useQuery({
+    queryKey: ['user-envs', userId],
+    queryFn: () => api.getUserEnvironments(userId),
+  });
 
   const handleCreateAgent = (formData: FormData) => {
     const name = formData.get('name') as string;
@@ -153,12 +162,40 @@ export function AgentList({ userId }: AgentListProps) {
           </DialogTrigger>
           <DialogContent>
             <DialogHeader>
-              <DialogTitle>Create New Agent</DialogTitle>
-              <DialogDescription>
-                Add a new AI coding agent with credentials
-              </DialogDescription>
+               <DialogTitle>Create New Agent</DialogTitle>
+               <DialogDescription>
+                 Add a new AI coding agent and set up authentication.
+               </DialogDescription>
             </DialogHeader>
-            <form action={handleCreateAgent} className="space-y-4">
+            <form
+              className="space-y-4"
+              onSubmit={async (e) => {
+                e.preventDefault();
+                const form = e.currentTarget as HTMLFormElement;
+                const formData = new FormData(form);
+                const name = formData.get('name') as string;
+                const type = formData.get('type') as 'claude-code' | 'gemini-cli' | 'qwen-coder' | 'cursor-cli';
+                const credentialType = formData.get('credentialType') as string;
+                const credentialValue = formData.get('credentialValue') as string;
+                const envId = formData.get('setupEnv') as string | null;
+                try {
+                  const created = await api.createAgent(userId, name, type, credentialType && credentialValue ? { type: credentialType, value: credentialValue } : undefined);
+                  // If type is claude-code and an environment is chosen, immediately launch inline setup
+                  if (type === 'claude-code' && envId) {
+                    setCreateDialogOpen(false);
+                    setSetupAgent(created as any);
+                    setSetupEnvId(envId);
+                    const { sessionId } = await api.startAgentSetup((created as any).id, envId);
+                    setSetupSessionId(sessionId);
+                  } else {
+                    queryClient.invalidateQueries({ queryKey: ['agents', userId] });
+                    setCreateDialogOpen(false);
+                  }
+                } catch (err: any) {
+                  toast({ title: 'Failed to create agent', description: err.message, variant: 'destructive' });
+                }
+              }}
+            >
               <div className="space-y-2">
                 <Label htmlFor="name">Agent Name</Label>
                 <Input 
@@ -180,6 +217,21 @@ export function AgentList({ userId }: AgentListProps) {
                     <SelectItem value="gemini-cli">💎 Gemini CLI</SelectItem>
                     <SelectItem value="qwen-coder">🧠 Qwen Coder</SelectItem>
                     <SelectItem value="cursor-cli">🖱️ Cursor CLI</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* Optional immediate setup environment for Claude */}
+              <div className="space-y-2">
+                <Label htmlFor="setupEnv">Setup Environment (Claude only)</Label>
+                <Select name="setupEnv">
+                  <SelectTrigger>
+                    <SelectValue placeholder="Skip setup for now" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {(envs?.environments || []).map((e: any) => (
+                      <SelectItem key={e.id} value={e.id}>{e.name}</SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </div>
@@ -247,11 +299,27 @@ export function AgentList({ userId }: AgentListProps) {
                     <span className="text-2xl">{getAgentTypeIcon(agent.type)}</span>
                     <div>
                       <CardTitle className="text-base">{agent.name}</CardTitle>
-                      <CardDescription>{agent.type}</CardDescription>
+                      <CardDescription className="flex items-center gap-2">
+                        {agent.type}
+                        {agent.credential_type ? (
+                          <Badge variant="secondary">Configured</Badge>
+                        ) : (
+                          <Badge variant="outline">Not configured</Badge>
+                        )}
+                      </CardDescription>
                     </div>
                   </div>
                   
                   <div className="flex items-center space-x-1">
+                    {!agent.credential_type && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => { setSetupAgent(agent); setSetupEnvId(''); setSetupSessionId(''); }}
+                      >
+                        Setup
+                      </Button>
+                    )}
                     <Button
                       variant="ghost"
                       size="sm"
@@ -304,6 +372,87 @@ export function AgentList({ userId }: AgentListProps) {
           ))}
         </div>
       )}
+
+      {/* Setup Panel */}
+      <Dialog open={!!setupAgent} onOpenChange={() => { setSetupAgent(null); setSetupSessionId(''); }}>
+        <DialogContent className="max-w-4xl">
+          <DialogHeader>
+            <DialogTitle>Setup {setupAgent?.name}</DialogTitle>
+            <DialogDescription>Authenticate the agent without leaving this page.</DialogDescription>
+          </DialogHeader>
+
+          {!setupSessionId ? (
+            <form
+              className="space-y-4"
+              onSubmit={async (e) => {
+                e.preventDefault();
+                if (!setupAgent || !setupEnvId) return;
+                try {
+                  const { sessionId } = await api.startAgentSetup(setupAgent.id, setupEnvId);
+                  setSetupSessionId(sessionId);
+                } catch (err: any) {
+                  toast({ title: 'Failed to start setup', description: err.message, variant: 'destructive' });
+                }
+              }}
+            >
+              <div className="space-y-2">
+                <Label>Select Environment</Label>
+                <Select value={setupEnvId} onValueChange={setSetupEnvId} required>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Choose environment" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {(envs?.environments || []).map((e: any) => (
+                      <SelectItem key={e.id} value={e.id}>{e.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="flex justify-end">
+                <Button type="submit" disabled={!setupEnvId}>Start Setup</Button>
+              </div>
+            </form>
+          ) : (
+            <div className="space-y-4">
+              <p className="text-sm text-muted-foreground">Complete the login in the terminal below. We’ll auto-finish if we detect a token.</p>
+              <InlineTerminal
+                sessionId={setupSessionId}
+                environmentId={setupEnvId}
+                height={420}
+                onTokenDetected={(t) => setDetectedToken(t)}
+              />
+              <div className="flex justify-end gap-2">
+                <Button
+                  variant="outline"
+                  onClick={() => { setSetupAgent(null); setSetupSessionId(''); }}
+                >
+                  Close
+                </Button>
+                <Button
+                  onClick={async () => {
+                    if (!setupAgent) return;
+                    try {
+                      await api.ingestAgentCredentials(setupAgent.id, detectedToken || undefined);
+                      toast({ title: 'Agent configured' });
+                      setSetupAgent(null);
+                      setSetupSessionId('');
+                      setDetectedToken('');
+                      queryClient.invalidateQueries({ queryKey: ['agents', userId] });
+                    } catch (err: any) {
+                      toast({ title: 'Finalize failed', description: err.message, variant: 'destructive' });
+                    }
+                  }}
+                >
+                  Finalize
+                </Button>
+                {detectedToken && (
+                  <span className="text-xs text-green-600 self-center">Token detected</span>
+                )}
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
 
       {/* Edit Agent Dialog */}
       <Dialog open={!!editingAgent} onOpenChange={() => setEditingAgent(null)}>

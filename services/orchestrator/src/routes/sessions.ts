@@ -2,6 +2,7 @@ import { FastifyPluginAsync } from 'fastify';
 import { getDatabase } from '../lib/kysely';
 import { Session } from './environments';
 import { worktreeService } from '../services/worktree';
+import { ensureContainerRunning } from '../services/docker';
 import os from 'os';
 
 export const sessionRoutes: FastifyPluginAsync = async (server) => {
@@ -91,6 +92,18 @@ export const sessionRoutes: FastifyPluginAsync = async (server) => {
         reply.code(400).send({ 
           error: 'Environment in error state',
           details: 'The environment is in an error state. This usually means the Docker image is not built. Run:\ndocker build -f services/orchestrator/docker/sandbox.Dockerfile -t craftastic-sandbox:latest .'
+        });
+        return;
+      }
+
+      // Ensure container is running before creating session
+      try {
+        await ensureContainerRunning(environment.container_id);
+      } catch (error) {
+        console.error(`[Sessions] Failed to ensure container running:`, error);
+        reply.code(500).send({ 
+          error: 'Failed to start container',
+          details: `Could not start the environment container: ${error instanceof Error ? error.message : 'Unknown error'}`
         });
         return;
       }
