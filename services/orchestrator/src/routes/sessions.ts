@@ -191,18 +191,20 @@ export const sessionRoutes: FastifyPluginAsync = async (server) => {
         .executeTakeFirstOrThrow();
 
       /**
-       * SESSION CREATION WITH SESSION-OWNED CONTAINERS
-       * ==============================================
+       * SESSION CREATION WITH CONTAINER-NATIVE WORKTREES
+       * ===============================================
        * 
        * Hoare Triple:
        * {P: environment_exists(environmentId) ∧ sessionBranch ≠ null}
        * create_session_with_container()
        * {Q: session_created ∧ session.container_id ≠ null ∧ 
-       *     (repository_url ≠ null ⟹ worktree_mounted_at_/workspace)}
+       *     (repository_url ≠ null ⟹ worktree_created_at_/workspace)}
        * 
-       * Architecture:
+       * Container-Native Architecture:
        * - Sessions own containers (not environments)
-       * - Each session gets isolated container with its worktree
+       * - Bare repo mounted read-only at /data/repos/{env_id}
+       * - Worktree created inside container at /workspace
+       * - All git operations use absolute container paths
        * - Environments are pure git repository mappings
        */
       let finalWorkingDirectory = workingDirectory;
@@ -213,22 +215,14 @@ export const sessionRoutes: FastifyPluginAsync = async (server) => {
           // Create worktree manager for this environment
           const worktreeManager = createWorktreeManager(environmentId);
           
-          // Ensure the worktree exists for this branch
-          const worktreePath = await worktreeManager.ensureWorktree(sessionBranch);
+          // Use new container-native approach - let worktreeManager handle everything
+          containerId = await worktreeManager.ensureSessionContainer(
+            sessionData.id,
+            sessionBranch,
+            sessionName || 'session',
+            environmentDetails.name
+          );
           
-          // Create container for THIS SESSION with worktree mounted
-          const container = await createSandbox({
-            sessionId: sessionData.id,
-            userId: environmentDetails.user_id,
-            environmentName: environmentDetails.name,
-            sessionName: sessionName || 'session',
-            worktreeMounts: [{
-              hostPath: worktreePath,
-              containerPath: '/workspace'
-            }]
-          });
-          
-          containerId = container.id;
           finalWorkingDirectory = '/workspace';
           
           console.log(`✅ Created session ${sessionData.id} with container ${containerId} for branch ${sessionBranch}`);

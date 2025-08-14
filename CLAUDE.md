@@ -189,16 +189,102 @@ CORS_ORIGIN=*
 - **Migration System**: Custom Kysely-based migrations for schema evolution
 - **PostgreSQL**: Robust ACID compliance for development environment state
 
-### Container Strategy  
+### Container Strategy (Container-Native Worktrees)
 - **Docker Integration**: Direct Dockerode usage for container lifecycle
 - **tmux Sessions**: Persistent terminal sessions within containers
+- **Container-Native Git**: Worktrees created INSIDE containers using absolute container paths
+- **Bare Repository Mounting**: **Read-write** bare repo mounted at `/data/repos/{env_id}` (required for worktree metadata)
+- **Worktree Location**: Always at `/workspace` inside each container
+- **Path Resolution**: All git operations use container-absolute paths (no host path conflicts)
+- **Mount Requirements**: Bare repositories MUST be mounted read-write for git worktree functionality
+- **Error Handling**: Comprehensive validation and recovery for mount issues, permission problems, and disk space
 - **Sandbox Security**: Limited container capabilities and resource constraints
 - **Terminal Configuration**: Custom sandbox.Dockerfile with tmux-256color support and terminal fixes
+
+#### Critical Mount Requirements
+- **Bare Repository Mount**: Must be read-write at `/data/repos/{env_id}`
+  - Required for git worktree metadata storage in `{bare_repo}/worktrees/` directory
+  - Git writes tracking information when creating/removing worktrees
+  - Read-only mounts will cause "Read-only file system" errors
+- **Worktree Creation**: Always at `/workspace` inside container using container-absolute paths
+- **Security**: Container runs as non-root user with limited capabilities for security
+- **Validation**: Automatic verification of mount permissions and worktree creation success
 
 ### Frontend Architecture
 - **Component-First**: Reusable shadcn/ui components
 - **Server State**: TanStack Query for API data management
 - **Real-time**: WebSocket integration for terminal sessions
+
+## Development Methodology: Hoare Logic and Formal Verification
+
+When making any code changes to Craftastic, ALWAYS follow this methodology to ensure correctness and maintainability:
+
+### 1. Hoare Logic Specification
+- **Define preconditions {P}** and **postconditions {Q}** for each function
+- **Express invariants** that must hold throughout execution
+- **Document state transitions** formally using set theory and logic
+- Use formal notation: `{P} function_name(params) {Q}`
+
+### 2. Comprehensive Case Analysis
+- **Enumerate ALL possible cases** (success and failure paths)
+- **Document error cases** with specific handling strategies  
+- **Include edge cases** and recovery mechanisms
+- **Consider concurrency** and race conditions
+- Label cases systematically (E1, E2, etc. for errors)
+
+### 3. Code Documentation Standards
+- **Document Hoare triples** directly in code comments above functions
+- **List all handled cases** with their resolutions
+- **Include invariants** and state model definitions
+- **Cross-reference** error cases with test cases
+
+### 4. Comprehensive Test Coverage
+- **Write tests for EVERY case** identified in analysis
+- **Include regression tests** for all bugs fixed
+- **Test both success and failure paths** thoroughly
+- **Use descriptive test names** that reference case numbers
+- **Mock external dependencies** properly
+
+### 5. Verification and Validation
+- **Run all tests** before committing any code
+- **Verify postconditions** are met in practice
+- **Ensure invariants** are preserved across operations
+- **Test edge cases** manually when automated testing is insufficient
+
+### Example Code Documentation Format:
+```typescript
+/**
+ * FUNCTION_NAME - Brief description
+ * ================================
+ * 
+ * Hoare Triple:
+ * {P: precondition ∧ additional_constraint}
+ * function_name(parameters)
+ * {Q: postcondition ∧ invariant_preserved}
+ * 
+ * Case Analysis:
+ * 1. Normal case → Action taken
+ * 2. Edge case A → Specific handling
+ * 3. Error case E1 → Recovery strategy
+ * 4. Error case E2 → Alternative approach
+ * 
+ * Invariants:
+ * - I1: Critical invariant that must hold
+ * - I2: Additional system constraint
+ * 
+ * Error Cases:
+ * - E1: Specific error condition → Resolution
+ * - E2: Another error → How we handle it
+ */
+function exampleFunction(params) { ... }
+```
+
+### Integration with Development Workflow
+Every code change must include:
+1. **Formal specification** (Hoare triple)
+2. **Complete case analysis** (documented in code)
+3. **Comprehensive tests** (covering all cases)
+4. **Verification** (tests passing + manual validation)
 
 ## Development Workflow
 

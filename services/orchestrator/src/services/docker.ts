@@ -14,10 +14,14 @@ export interface SandboxOptions {
     hostPath: string;
     containerPath: string;
   }>;
+  bareRepoMounts?: Array<{
+    hostPath: string;
+    containerPath: string;
+  }>;
 }
 
 export async function createSandbox(options: SandboxOptions) {
-  const { sessionId, userId, environmentName, sessionName, worktreeMounts = [] } = options;
+  const { sessionId, userId, environmentName, sessionName, worktreeMounts = [], bareRepoMounts = [] } = options;
   
   // Check if the Docker image exists
   try {
@@ -54,7 +58,12 @@ export async function createSandbox(options: SandboxOptions) {
   const containerName = nameParts.join('-');
   
   // Prepare volume mounts
-  const binds = worktreeMounts.map(mount => `${mount.hostPath}:${mount.containerPath}:rw`);
+  const binds = [
+    ...worktreeMounts.map(mount => `${mount.hostPath}:${mount.containerPath}:rw`),
+    // CRITICAL: Bare repositories MUST be mounted read-write (rw) because git worktree
+    // operations need to write metadata to the bare repo's worktrees/ directory
+    ...bareRepoMounts.map(mount => `${mount.hostPath}:${mount.containerPath}:rw`)
+  ];
   
   const container = await docker.createContainer({
     Image: config.SANDBOX_IMAGE,
@@ -88,6 +97,7 @@ export async function createSandbox(options: SandboxOptions) {
       `ENVIRONMENT_NAME=${environmentName || 'env'}`,
       `SESSION_NAME=${sessionName || 'session'}`,
       `WORKTREE_PATH=${worktreeMounts[0]?.containerPath || '/workspace'}`,
+      `BARE_REPO_PATH=${bareRepoMounts[0]?.containerPath || '/data/repos'}`,
     ],
   });
 

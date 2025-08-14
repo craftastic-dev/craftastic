@@ -93,22 +93,25 @@ export const terminalRoutes: FastifyPluginAsync = async (server) => {
       }
 
       /**
-       * TERMINAL CONNECTION WITH SESSION CONTAINER AUTO-RECOVERY
-       * =======================================================
+       * TERMINAL CONNECTION WITH CONTAINER-NATIVE WORKTREE AUTO-RECOVERY
+       * ===============================================================
        * 
        * Hoare Triple:
        * {P: session_id ∈ Sessions ∧ user_authorized}
        * connect_to_terminal(session_id)
        * {Q: connected_to_session_container ∧ container_running ∧ 
-       *     (repository_url ≠ null ⟹ worktree_mounted_at_/workspace)}
+       *     (repository_url ≠ null ⟹ worktree_created_at_/workspace)}
        * 
-       * Architecture: Sessions own containers, environments are git mappings
+       * Container-Native Architecture:
+       * - Sessions own containers, environments are git mappings
+       * - Bare repo mounted read-only at /data/repos/{env_id}
+       * - Worktree created inside container at /workspace using container paths
        * 
        * Recovery Cases:
-       * 1. Session has container + running → connect directly (O(1))
-       * 2. Session has container + dead → recreate session container
-       * 3. Session has no container → create container with worktree
-       * 4. Worktree broken → recover worktree then container
+       * 1. Session has container + running + valid worktree → connect directly (O(1))
+       * 2. Session has container + running + invalid worktree → recreate worktree
+       * 3. Session has container + dead → recreate session container with worktree
+       * 4. Session has no container → create container with bare repo mount + worktree
        */
       let containerId = sessionWithEnv.container_id;
 
@@ -117,11 +120,11 @@ export const terminalRoutes: FastifyPluginAsync = async (server) => {
         console.log(`[Terminal WebSocket] No container for session ${sessionId}, creating session container...`);
         
         try {
-          // Use session-owned container approach
+          // Use session-owned container approach with container-native worktree creation
           if (sessionWithEnv.repository_url && sessionWithEnv.git_branch) {
             const worktreeManager = createWorktreeManager(environmentId);
             
-            // Create container for this session with worktree
+            // Create container for this session with bare repo mount + container-native worktree
             containerId = await worktreeManager.ensureSessionContainer(
               sessionId,
               sessionWithEnv.git_branch,
@@ -136,7 +139,9 @@ export const terminalRoutes: FastifyPluginAsync = async (server) => {
           }
         } catch (error) {
           console.error(`❌ Failed to create session container ${sessionId}:`, error);
-          connection.socket.close(1008, `Container creation failed: ${error.message}`);
+          // Truncate error message to avoid WebSocket message length limit (123 bytes)
+          const errorMsg = `Container creation failed: ${error.message}`.substring(0, 120);
+          connection.socket.close(1008, errorMsg);
           return;
         }
       } else {
@@ -146,7 +151,7 @@ export const terminalRoutes: FastifyPluginAsync = async (server) => {
         } catch (error) {
           console.log(`[Terminal WebSocket] Session container ${containerId} failed health check, recreating...`);
           
-          // Container is dead - recreate it for this session
+          // Container is dead - recreate it for this session with container-native worktree
           try {
             if (sessionWithEnv.repository_url && sessionWithEnv.git_branch) {
               const worktreeManager = createWorktreeManager(environmentId);
@@ -156,13 +161,15 @@ export const terminalRoutes: FastifyPluginAsync = async (server) => {
                 sessionWithEnv.name || 'terminal',
                 sessionWithEnv.environment_name
               );
-              console.log(`✅ Recreated session container: ${containerId}`);
+              console.log(`✅ Recreated session container with container-native worktree: ${containerId}`);
             } else {
               throw new Error('Cannot recover: missing repository or branch info');
             }
           } catch (recoveryError) {
             console.error(`❌ Container recovery failed for session ${sessionId}:`, recoveryError);
-            connection.socket.close(1008, `Container recovery failed: ${recoveryError.message}`);
+            // Truncate error message to avoid WebSocket message length limit (123 bytes)
+            const errorMsg = `Container recovery failed: ${recoveryError.message}`.substring(0, 120);
+            connection.socket.close(1008, errorMsg);
             return;
           }
         }
