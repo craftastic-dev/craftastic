@@ -1,9 +1,8 @@
 import { FastifyInstance } from 'fastify';
 import { getDatabase } from '../lib/kysely';
-import { createSandbox, destroySandbox, getDocker } from '../services/docker';
+import { destroySandbox, getDocker } from '../services/docker';
 import { userService } from '../services/user';
 import { config } from '../config';
-import os from 'os';
 
 export interface Environment {
   id: string;
@@ -96,7 +95,18 @@ export async function environmentRoutes(fastify: FastifyInstance) {
         return;
       }
       
-      // Create environment record (only after confirming Docker image exists)
+      /**
+       * ENVIRONMENT CREATION - Git Repository Mapping Only
+       * =================================================
+       * 
+       * Hoare Triple:
+       * {P: name ∧ userId ∧ ¬∃e. e.name = name ∧ e.userId = userId}
+       * createEnvironment(name, userId, repositoryUrl?)
+       * {Q: ∃e ∈ E. e.name = name ∧ e.container_id = null ∧ e.status = 'ready'}
+       * 
+       * Invariant: Environments never have containers - they are pure git mappings
+       * Sessions will create their own containers when needed
+       */
       const environment = await db
         .insertInto('environments')
         .values({
@@ -104,48 +114,21 @@ export async function environmentRoutes(fastify: FastifyInstance) {
           name,
           repository_url: repositoryUrl || null,
           branch,
-          status: 'starting',
+          status: 'ready', // Ready for sessions to be created, no container
         })
-        .returningAll()
-        .executeTakeFirstOrThrow();
-
-      // Create Docker container for this environment
-      // Mount the craftastic data directory so all worktrees are accessible
-      const dataDir = process.env.CRAFTASTIC_DATA_DIR || os.homedir() + '/.craftastic';
-      
-      // Create Docker container
-      const container = await createSandbox({
-        sessionId: environment.id, // Use environment ID as session ID for now
-        userId,
-        environmentName: name,
-        worktreeMounts: [{
-          hostPath: dataDir,
-          containerPath: '/data'
-        }]
-      });
-      
-      // Update environment with container ID
-      const updatedEnvironment = await db
-        .updateTable('environments')
-        .set({
-          container_id: container.id,
-          status: 'running',
-          updated_at: new Date(),
-        })
-        .where('id', '=', environment.id)
         .returningAll()
         .executeTakeFirstOrThrow();
 
       const responseEnv: Environment = {
-        id: updatedEnvironment.id,
-        userId: updatedEnvironment.user_id,
-        name: updatedEnvironment.name,
-        repositoryUrl: updatedEnvironment.repository_url || undefined,
-        branch: updatedEnvironment.branch,
-        containerId: updatedEnvironment.container_id || undefined,
-        status: updatedEnvironment.status,
-        createdAt: updatedEnvironment.created_at.toISOString(),
-        updatedAt: updatedEnvironment.updated_at.toISOString(),
+        id: environment.id,
+        userId: environment.user_id,
+        name: environment.name,
+        repositoryUrl: environment.repository_url || undefined,
+        branch: environment.branch,
+        containerId: undefined, // Environments never have containers
+        status: environment.status,
+        createdAt: environment.created_at.toISOString(),
+        updatedAt: environment.updated_at.toISOString(),
       };
 
       reply.send(responseEnv);

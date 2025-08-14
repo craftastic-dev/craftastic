@@ -85,6 +85,9 @@ export async function createSandbox(options: SandboxOptions) {
       'NODE_ENV=development',
       `USER_ID=${userId}`,
       `SESSION_ID=${sessionId}`,
+      `ENVIRONMENT_NAME=${environmentName || 'env'}`,
+      `SESSION_NAME=${sessionName || 'session'}`,
+      `WORKTREE_PATH=${worktreeMounts[0]?.containerPath || '/workspace'}`,
     ],
   });
 

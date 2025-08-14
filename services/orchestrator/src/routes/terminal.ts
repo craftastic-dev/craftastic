@@ -3,6 +3,7 @@ import { createTerminalSession } from '../services/terminal';
 import { getDatabase } from '../lib/kysely';
 // import { verifySessionExists } from '../services/session-cleanup';
 import { getDocker, ensureContainerRunning } from '../services/docker';
+import { createWorktreeManager } from '../services/worktree-manager';
 
 export const terminalRoutes: FastifyPluginAsync = async (server) => {
   const db = getDatabase();
@@ -55,7 +56,10 @@ export const terminalRoutes: FastifyPluginAsync = async (server) => {
           's.last_activity',
           's.session_type',
           's.agent_id',
-          'e.container_id'
+          's.git_branch',
+          's.container_id',  // Session's container, not environment's
+          'e.name as environment_name',
+          'e.repository_url'
         ])
         .where('s.id', '=', sessionId)
         .executeTakeFirst();
@@ -88,20 +92,80 @@ export const terminalRoutes: FastifyPluginAsync = async (server) => {
         return;
       }
 
-      const containerId = sessionWithEnv.container_id;
+      /**
+       * TERMINAL CONNECTION WITH SESSION CONTAINER AUTO-RECOVERY
+       * =======================================================
+       * 
+       * Hoare Triple:
+       * {P: session_id ∈ Sessions ∧ user_authorized}
+       * connect_to_terminal(session_id)
+       * {Q: connected_to_session_container ∧ container_running ∧ 
+       *     (repository_url ≠ null ⟹ worktree_mounted_at_/workspace)}
+       * 
+       * Architecture: Sessions own containers, environments are git mappings
+       * 
+       * Recovery Cases:
+       * 1. Session has container + running → connect directly (O(1))
+       * 2. Session has container + dead → recreate session container
+       * 3. Session has no container → create container with worktree
+       * 4. Worktree broken → recover worktree then container
+       */
+      let containerId = sessionWithEnv.container_id;
 
+      // Auto-recovery: If no container or container is dead, recover automatically
       if (!containerId) {
-        connection.socket.close(1008, 'Environment container not available');
-        return;
-      }
-      
-      // Ensure container is running (will start if stopped)
-      try {
-        await ensureContainerRunning(containerId);
-      } catch (error) {
-        console.error(`[Terminal WebSocket] Failed to ensure container running:`, error);
-        connection.socket.close(1008, 'Failed to start container');
-        return;
+        console.log(`[Terminal WebSocket] No container for session ${sessionId}, creating session container...`);
+        
+        try {
+          // Use session-owned container approach
+          if (sessionWithEnv.repository_url && sessionWithEnv.git_branch) {
+            const worktreeManager = createWorktreeManager(environmentId);
+            
+            // Create container for this session with worktree
+            containerId = await worktreeManager.ensureSessionContainer(
+              sessionId,
+              sessionWithEnv.git_branch,
+              sessionWithEnv.name || 'terminal',
+              sessionWithEnv.environment_name
+            );
+            
+            console.log(`✅ Created session container ${containerId} for session ${sessionId}`);
+          } else {
+            connection.socket.close(1008, 'Cannot create container: missing repository or branch info');
+            return;
+          }
+        } catch (error) {
+          console.error(`❌ Failed to create session container ${sessionId}:`, error);
+          connection.socket.close(1008, `Container creation failed: ${error.message}`);
+          return;
+        }
+      } else {
+        // Session has container - ensure it's running (may auto-recover if dead)
+        try {
+          await ensureContainerRunning(containerId);
+        } catch (error) {
+          console.log(`[Terminal WebSocket] Session container ${containerId} failed health check, recreating...`);
+          
+          // Container is dead - recreate it for this session
+          try {
+            if (sessionWithEnv.repository_url && sessionWithEnv.git_branch) {
+              const worktreeManager = createWorktreeManager(environmentId);
+              containerId = await worktreeManager.ensureSessionContainer(
+                sessionId,
+                sessionWithEnv.git_branch,
+                sessionWithEnv.name || 'terminal',
+                sessionWithEnv.environment_name
+              );
+              console.log(`✅ Recreated session container: ${containerId}`);
+            } else {
+              throw new Error('Cannot recover: missing repository or branch info');
+            }
+          } catch (recoveryError) {
+            console.error(`❌ Container recovery failed for session ${sessionId}:`, recoveryError);
+            connection.socket.close(1008, `Container recovery failed: ${recoveryError.message}`);
+            return;
+          }
+        }
       }
       
       console.log(`[Terminal WebSocket] Creating terminal session for ${sessionWithEnv.name} (${sessionId})`);

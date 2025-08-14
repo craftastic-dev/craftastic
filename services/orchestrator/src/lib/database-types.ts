@@ -60,6 +60,7 @@ export interface SessionTable {
   worktree_path: string | null;
   git_branch: string | null;
   is_feature_branch: boolean;
+  container_id: string | null;
   created_at: Generated<Date>;
   updated_at: Generated<Date>;
   last_activity: Date | null;

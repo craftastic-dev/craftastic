@@ -90,6 +90,9 @@ set -g mouse off
 set -g history-limit 50000
 set -sg escape-time 0
 
+# Use login shell to source .bashrc
+set -g default-command "bash -l"
+
 # Mouse selection behavior - let xterm.js handle selection
 # Disable tmux copy mode activation via mouse
 set -g @prevent_copy_mode 'on'
@@ -122,38 +125,65 @@ set -g status-right "%H:%M"
 EOF
 
 # Create a nice bash profile
-RUN echo '# Bash configuration\n\
-export EDITOR=nvim\n\
-export SHELL=/bin/bash\n\
-export PATH="/home/appuser/.local/bin:$PATH"\n\
-\n\
-# Aliases\n\
-alias ll="ls -la"\n\
-alias la="ls -A"\n\
-alias l="ls -CF"\n\
-alias vim="nvim"\n\
-alias vi="nvim"\n\
-alias lv="lvim"\n\
-alias lg="lazygit"\n\
-alias gs="git status"\n\
-alias ga="git add"\n\
-alias gc="git commit"\n\
-alias gp="git push"\n\
-alias gpl="git pull"\n\
-alias gd="git diff"\n\
-\n\
-# Claude Code aliases\n\
-alias cc="claude-code"\n\
-alias claude="claude-code"\n\
-\n\
-# Welcome message\n\
-echo "🚀 Craftify Development Environment"\n\
-echo "📝 Editors: nvim, lvim (LunarVim)"\n\
-echo "🔧 Tools: tmux, git, lazygit, claude-code"\n\
-echo "💾 Your tmux session persists across reconnections!"\n\
-echo "🔑 Tmux prefix: Ctrl+A (use Ctrl+A ? for help)"\n\
-echo "🤖 Use '"'"'claude'"'"' or '"'"'cc'"'"' for Claude Code CLI"\n\
-echo ""' > /home/appuser/.bashrc
+RUN cat > /home/appuser/.bashrc << 'EOF'
+# Bash configuration
+export EDITOR=nvim
+export SHELL=/bin/bash
+export PATH="/home/appuser/.local/bin:$PATH"
+
+# Custom prompt showing session@environment:path
+function get_prompt_path() {
+    local current_dir=$(pwd)
+    local worktree_path="${WORKTREE_PATH:-/workspace}"
+    
+    # If we're in the worktree, show relative path
+    if [[ "$current_dir" == "$worktree_path"* ]]; then
+        local relative_path="${current_dir#$worktree_path}"
+        relative_path="${relative_path#/}"
+        echo "${relative_path:-/}"
+    else
+        echo "$current_dir"
+    fi
+}
+
+export PS1='${SESSION_NAME:-session}@${ENVIRONMENT_NAME:-env}:$(get_prompt_path)\$ '
+
+# Aliases
+alias ll="ls -la"
+alias la="ls -A"
+alias l="ls -CF"
+alias vim="nvim"
+alias vi="nvim"
+alias lv="lvim"
+alias lg="lazygit"
+alias gs="git status"
+alias ga="git add"
+alias gc="git commit"
+alias gp="git push"
+alias gpl="git pull"
+alias gd="git diff"
+
+# Claude Code aliases
+alias cc="claude-code"
+alias claude="claude-code"
+
+# Welcome message
+echo "🚀 Craftify Development Environment"
+echo "📝 Editors: nvim, lvim (LunarVim)"
+echo "🔧 Tools: tmux, git, lazygit, claude-code"
+echo "💾 Your tmux session persists across reconnections!"
+echo "🔑 Tmux prefix: Ctrl+A (use Ctrl+A ? for help)"
+echo "🤖 Use 'claude' or 'cc' for Claude Code CLI"
+echo ""
+EOF
+
+# Create .bash_profile to source .bashrc for login shells
+RUN cat > /home/appuser/.bash_profile << 'EOF'
+# Source .bashrc if it exists
+if [ -f ~/.bashrc ]; then
+    . ~/.bashrc
+fi
+EOF
 
 # Create minimal neovim configuration
 RUN mkdir -p /home/appuser/.config/nvim && \

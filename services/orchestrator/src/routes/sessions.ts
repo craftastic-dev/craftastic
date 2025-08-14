@@ -2,7 +2,8 @@ import { FastifyPluginAsync } from 'fastify';
 import { getDatabase } from '../lib/kysely';
 import { Session } from './environments';
 import { worktreeService } from '../services/worktree';
-import { ensureContainerRunning } from '../services/docker';
+import { createSandbox } from '../services/docker';
+import { createWorktreeManager } from '../services/worktree-manager';
 import os from 'os';
 
 export const sessionRoutes: FastifyPluginAsync = async (server) => {
@@ -66,10 +67,10 @@ export const sessionRoutes: FastifyPluginAsync = async (server) => {
     };
 
     try {
-      // Verify environment exists and has a container
+      // Verify environment exists
       const environment = await db
         .selectFrom('environments')
-        .select(['id', 'container_id', 'status'])
+        .select(['id', 'status'])
         .where('id', '=', environmentId)
         .executeTakeFirst();
 
@@ -78,32 +79,11 @@ export const sessionRoutes: FastifyPluginAsync = async (server) => {
         return;
       }
 
-      // Check if environment has a container
-      if (!environment.container_id) {
-        reply.code(400).send({ 
-          error: 'Environment not ready',
-          details: 'Environment does not have a Docker container. This usually means the Docker image is not built. Run:\ndocker build -f services/orchestrator/docker/sandbox.Dockerfile -t craftastic-sandbox:latest .'
-        });
-        return;
-      }
-
-      // Check if environment is in error state
+      // Check if environment is in error state (optional check)
       if (environment.status === 'error') {
         reply.code(400).send({ 
           error: 'Environment in error state',
-          details: 'The environment is in an error state. This usually means the Docker image is not built. Run:\ndocker build -f services/orchestrator/docker/sandbox.Dockerfile -t craftastic-sandbox:latest .'
-        });
-        return;
-      }
-
-      // Ensure container is running before creating session
-      try {
-        await ensureContainerRunning(environment.container_id);
-      } catch (error) {
-        console.error(`[Sessions] Failed to ensure container running:`, error);
-        reply.code(500).send({ 
-          error: 'Failed to start container',
-          details: `Could not start the environment container: ${error instanceof Error ? error.message : 'Unknown error'}`
+          details: 'The environment is in an error state. Please check the environment configuration.'
         });
         return;
       }
@@ -125,7 +105,7 @@ export const sessionRoutes: FastifyPluginAsync = async (server) => {
       // Get environment details early to determine branch
       const environmentDetails = await db
         .selectFrom('environments')
-        .select(['repository_url', 'branch'])
+        .select(['repository_url', 'branch', 'name', 'user_id'])
         .where('id', '=', environmentId)
         .executeTakeFirst();
 
@@ -210,39 +190,80 @@ export const sessionRoutes: FastifyPluginAsync = async (server) => {
         .returningAll()
         .executeTakeFirstOrThrow();
 
+      /**
+       * SESSION CREATION WITH SESSION-OWNED CONTAINERS
+       * ==============================================
+       * 
+       * Hoare Triple:
+       * {P: environment_exists(environmentId) ∧ sessionBranch ≠ null}
+       * create_session_with_container()
+       * {Q: session_created ∧ session.container_id ≠ null ∧ 
+       *     (repository_url ≠ null ⟹ worktree_mounted_at_/workspace)}
+       * 
+       * Architecture:
+       * - Sessions own containers (not environments)
+       * - Each session gets isolated container with its worktree
+       * - Environments are pure git repository mappings
+       */
       let finalWorkingDirectory = workingDirectory;
+      let containerId: string | null = null;
       
       if (environmentDetails?.repository_url) {
         try {
-          const worktreePath = await worktreeService.createWorktree({
-            environmentId,
-            sessionId: sessionData.id,
-            repositoryUrl: environmentDetails.repository_url,
-            branch: sessionBranch,
-            containerId: environment.container_id || undefined,
-          });
-          // Convert host path to container path (data directory is mounted at /data)
-          const dataDir = process.env.CRAFTASTIC_DATA_DIR || os.homedir() + '/.craftastic';
-          const relativeWorktreePath = worktreePath.replace(dataDir, '');
-          finalWorkingDirectory = `/data${relativeWorktreePath}`;
+          // Create worktree manager for this environment
+          const worktreeManager = createWorktreeManager(environmentId);
           
-          // Update session with the container working directory and branch
+          // Ensure the worktree exists for this branch
+          const worktreePath = await worktreeManager.ensureWorktree(sessionBranch);
+          
+          // Create container for THIS SESSION with worktree mounted
+          const container = await createSandbox({
+            sessionId: sessionData.id,
+            userId: environmentDetails.user_id,
+            environmentName: environmentDetails.name,
+            sessionName: sessionName || 'session',
+            worktreeMounts: [{
+              hostPath: worktreePath,
+              containerPath: '/workspace'
+            }]
+          });
+          
+          containerId = container.id;
+          finalWorkingDirectory = '/workspace';
+          
+          console.log(`✅ Created session ${sessionData.id} with container ${containerId} for branch ${sessionBranch}`);
+        } catch (error) {
+          console.error(`❌ Failed to create session ${sessionData.id} with container:`, error);
+          // Mark session as failed but don't throw - let user see the error
           await db
             .updateTable('sessions')
             .set({
-              working_directory: finalWorkingDirectory,
-              git_branch: sessionBranch,
+              status: 'dead',
               updated_at: new Date(),
             })
             .where('id', '=', sessionData.id)
             .execute();
           
-          console.log(`✅ Created worktree for session ${sessionData.id}: ${worktreePath} -> ${finalWorkingDirectory}`);
-        } catch (error) {
-          console.warn(`⚠️  Failed to create worktree for session ${sessionData.id}:`, error.message);
-          // Don't fail session creation if worktree creation fails
+          reply.code(500).send({ 
+            error: 'Failed to create session with container',
+            details: error.message 
+          });
+          return;
         }
       }
+      
+      // Update session with container and final details
+      await db
+        .updateTable('sessions')
+        .set({
+          container_id: containerId,
+          working_directory: finalWorkingDirectory,
+          git_branch: sessionBranch,
+          status: containerId ? 'active' : 'inactive',
+          updated_at: new Date(),
+        })
+        .where('id', '=', sessionData.id)
+        .execute();
 
       // Refetch the session data to get the updated working directory
       const updatedSessionData = await db
